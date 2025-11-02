@@ -7,6 +7,7 @@ bot_config.json
 
 # Private documents
 Commandes
+backtest/
 
 # Python
 __pycache__/
