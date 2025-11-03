@@ -1,0 +1,29 @@
+[CONFIG] Configuration chargee depuis bot_config.json
+[CONFIG] RISK_PER_TRADE = 0.01
+[CONFIG] RR_TAKE_PROFIT = 1.8
+[CONFIG] MAX_CONCURRENT_TRADES = 2
+[CONFIG] ML_THRESHOLD = 0.4
+[LIVE] Demarre - EURUSD M5
+[LIVE] Chargement de 100,000 barres d'historique pour entrainer le modele ML...
+[*] Chargement de 100000 barres par chunks de 99000...
+    Chunk 1: position 0, taille 99000
+    Chunk 2: position 99000, taille 1000
+[OK] 100000 barres chargees au total (2 chunks)
+[LIVE] 100000 barres chargees avec succes
+[LIVE] Bot pret - Surveillance active des signaux ICT...
+C:\xampp\htdocs\php\ICT-Bot\ict_bot_all_in_one.py:1112: UserWarning: Boolean Series key will be reindexed to match DataFrame index.
+  cands = df.iloc[max(0,i-60):i][df['swing_low']]
+Traceback (most recent call last):
+  File "C:\xampp\htdocs\php\ICT-Bot\ict_bot_all_in_one.py", line 1403, in <module>
+    main()
+    ~~~~^^
+  File "C:\xampp\htdocs\php\ICT-Bot\ict_bot_all_in_one.py", line 1394, in main
+    live_loop(symbol=symbol, timeframe=timeframe)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\xampp\htdocs\php\ICT-Bot\ict_bot_all_in_one.py", line 1131, in live_loop
+    ok, msg = place_market_order(symbol, side, sl, tp, info, df=df)
+              ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\xampp\htdocs\php\ICT-Bot\ict_bot_all_in_one.py", line 1015, in place_market_order
+    filling = mt5.ORDER_FILLING_FOK if info.filling_mode in (mt5.SYMBOL_FILLING_FOK, mt5.ORDER_FILLING_FOK) else mt5.ORDER_FILLING_IOC
+                                                             ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'SYMBOL_FILLING_FOK'. Did you mean: 'ORDER_FILLING_FOK'?
