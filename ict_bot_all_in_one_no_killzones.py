@@ -1334,7 +1334,7 @@ def main():
 
                 metrics, hist = backtest(df, symbol=symbol, risk=RISK_PER_TRADE,
                                          rr=RR_TAKE_PROFIT, cooldown=COOLDOWN_BARS,
-                                         use_killzones=True, ml=ml_filter, info=info)
+                                         use_killzones=False, ml=ml_filter, info=info)  # MODIF: False pour trade 24/7
 
                 st = metrics['stats']
                 total_bars = len(df) - 50
