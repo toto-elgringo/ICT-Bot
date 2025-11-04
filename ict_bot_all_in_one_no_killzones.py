@@ -503,7 +503,7 @@ def make_features_for_ml(df, idx, fvg):
         vol = window['tick_volume'].mean()
     gap = abs(fvg['top'] - fvg['bot'])
     bias = 1 if infer_bias(df.iloc[idx]) == 'bull' else (-1 if infer_bias(df.iloc[idx]) == 'bear' else 0)
-    kz = 1 if in_kill_zone(now_paris()) else 0
+    kz = 0  # MODIF NO-KILLZONES: Toujours 0 pour trader 24/7
     x = np.array([gap, rng, vol, bias, kz], dtype=float).reshape(1,-1)
     return x
 
@@ -1049,7 +1049,7 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1"):
     tf_code = MT5_TF_MAP.get(timeframe, mt5.TIMEFRAME_M1)
     pip = get_pip_size_from_info(info)
 
-    print(f"[LIVE] Demarre - {symbol} {timeframe}")
+    print(f"[LIVE - VERSION NO KILL ZONES 24/7] Demarre - {symbol} {timeframe}")
     print(f"[LIVE] Chargement de 100,000 barres d'historique pour entrainer le modele ML...")
 
     # Charger 100k barres au demarrage pour le ML (avec chunking)
@@ -1076,7 +1076,7 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1"):
         # Faire un backtest rapide pour entraîner le ML
         metrics, _ = backtest(df_initial, symbol=symbol, risk=RISK_PER_TRADE,
                               rr=RR_TAKE_PROFIT, cooldown=COOLDOWN_BARS,
-                              use_killzones=True, ml=ml, info=info)
+                              use_killzones=False, ml=ml, info=info)  # MODIF: False pour trade 24/7
 
         print(f"[LIVE] Backtest initial termine:")
         print(f"       - Trades: {metrics['trades']}")
@@ -1114,9 +1114,7 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1"):
             cooldown -= 1
             continue
 
-        t_local = cur_time.tz_localize("UTC").astimezone(TZ_PARIS) if TZ_OK else cur_time
-        if not in_kill_zone(t_local):
-            continue
+        # MODIF NO-KILLZONES: Pas de vérification de kill zone - Trade 24/7
 
         bias = infer_bias(df.iloc[i])
         fvg = latest_fvg_confluence_row(df, i, max_lookback=60)
@@ -1192,7 +1190,7 @@ def launch_tk_dashboard(symbol=SYMBOL_DEFAULT, timeframe="M1"):
     ttk.Label(frame, text="Prob(ML)").grid(row=1, column=0, sticky="w")
     ttk.Label(frame, textvariable=prob_var).grid(row=1, column=1, sticky="w")
     ttk.Label(frame, text="Kill Zone").grid(row=2, column=0, sticky="w")
-    ttk.Label(frame, textvariable=kz_var).grid(row=2, column=1, sticky="w")
+    ttk.Label(frame, text="Désactivé (24/7)", foreground="green").grid(row=2, column=1, sticky="w")  # MODIF: Pas de kill zones
 
     run_var = tk.BooleanVar(value=False)
 
@@ -1214,7 +1212,7 @@ def launch_tk_dashboard(symbol=SYMBOL_DEFAULT, timeframe="M1"):
                         x = make_features_for_ml(df, i, fvg)
                         prob = f"{MLFilter().predict_proba(x)*100:.1f}%"
                     bias_var.set(bias)
-                    kz_var.set("Oui" if in_kill_zone(now_paris()) else "Non")
+                    kz_var.set("24/7 (Désactivé)")  # MODIF: Pas de kill zones
                     prob_var.set(prob)
                 mt5.shutdown()
         except Exception:
@@ -1244,7 +1242,7 @@ def run_streamlit(symbol=SYMBOL_DEFAULT, timeframe="M1"):
     col1, col2, col3 = st.columns(3)
     with col1: st.write(f"**Symbole**: {symbol}")
     with col2: st.write(f"**TF**: {timeframe}")
-    with col3: st.write(f"**Kill Zone**: {'Oui' if in_kill_zone(now_paris()) else 'Non'}")
+    with col3: st.write(f"**Kill Zone**: 24/7 (Désactivé)")  # MODIF: Pas de kill zones
 
     if MT5_OK and st.button("Rafraîchir"):
         if mt5.initialize(login=LOGIN, password=PASSWORD, server=SERVER):
