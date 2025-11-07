@@ -713,7 +713,6 @@ with tab4:
         for bt_file in backtest_files:
             filename = os.path.basename(bt_file)
             # Extraire SYMBOL_TIMEFRAME du nom de fichier
-            # Ex: backtest_XAUUSD_M30_20251101_232914.json -> XAUUSD_M30
             if filename.startswith('backtest_') and filename.endswith('.json'):
                 parts = filename.replace('backtest_', '').replace('.json', '').split('_')
                 if len(parts) >= 4:
