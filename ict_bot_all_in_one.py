@@ -109,7 +109,6 @@ RR_DEFAULT = 1.3
 
 # ML Meta-Labelling avec Rolling Window
 USE_ML_META_LABELLING = True
-ML_MODEL_PATH = "ict_model.pkl",
 MAX_ML_SAMPLES = 500
 
 # Kill Zones (heures Paris)
@@ -1049,7 +1048,7 @@ def place_market_order(symbol, side, sl, tp, info, df=None):
 
     return True, f"ticket={res.order or res.deal}"
 
-def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path="ict_model.pkl"):
+def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path=None):
     info = ensure_mt5_and_symbol(symbol)
     tf_code = MT5_TF_MAP.get(timeframe, mt5.TIMEFRAME_M1)
     pip = get_pip_size_from_info(info)
@@ -1090,7 +1089,7 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path="ict_model.pk
         print(f"       - Modele entraine: {ml.is_trained}")
 
         if ml.is_trained:
-            print(f"[LIVE] Modele ML pret et sauvegarde dans {ML_MODEL_PATH}")
+            print(f"[LIVE] Modele ML pret et sauvegarde dans {ml_model_path}")
         else:
             print(f"[LIVE] ATTENTION: Pas assez de trades pour entrainer le ML (min {ml.min_samples})")
     else:
@@ -1289,8 +1288,8 @@ def main():
                         help="Désactiver l'affichage des graphiques")
     parser.add_argument("--bot-name", type=str, default=None,
                         help="Nom du bot (pour le modèle ML)")
-    parser.add_argument("--ml-model-path", type=str, default="ict_model.pkl",
-                        help="Chemin du fichier modèle ML")
+    parser.add_argument("--ml-model-path", type=str, default=None,
+                        help="Chemin du fichier modèle ML (doit être dans machineLearning/)")
     args = parser.parse_args()
 
     symbol = args.symbol
@@ -1311,10 +1310,6 @@ def main():
         if mt5.initialize(login=LOGIN, password=PASSWORD, server=SERVER):
             if mt5.symbol_select(symbol, True):
                 info = mt5.symbol_info(symbol)
-
-                if os.path.exists(ML_MODEL_PATH):
-                    os.remove(ML_MODEL_PATH)
-                    print(f"[ML] Ancien modele supprime: {ML_MODEL_PATH}")
 
                 tf_code = MT5_TF_MAP.get(timeframe, mt5.TIMEFRAME_M5)
                 print(f"[*] Chargement de {bars} barres depuis MT5...")
