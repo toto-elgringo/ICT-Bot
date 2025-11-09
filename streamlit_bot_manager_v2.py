@@ -331,35 +331,6 @@ def get_open_positions_bot(login, password, server):
     mt5.shutdown()
     return pos_list
 
-def get_recent_deals(hours=24):
-    """Recupere les trades recents"""
-    if not MT5_AVAILABLE or not mt5.terminal_info():
-        return []
-
-    from datetime import timedelta
-    to_date = datetime.now()
-    from_date = to_date - timedelta(hours=hours)
-
-    deals = mt5.history_deals_get(from_date, to_date)
-    if deals is None or len(deals) == 0:
-        return []
-
-    deals_list = []
-    for deal in deals:
-        if deal.entry == 1:  # Entry deal
-            deals_list.append({
-                'ticket': deal.order,
-                'symbol': deal.symbol,
-                'type': 'BUY' if deal.type == 0 else 'SELL',
-                'volume': deal.volume,
-                'price': deal.price,
-                'profit': deal.profit,
-                'time': datetime.fromtimestamp(deal.time),
-                'comment': deal.comment
-            })
-
-    return deals_list
-
 def run_backtest_with_params(config, symbol, timeframe, bars):
     """Lance un backtest avec les parametres donnes"""
     # Lancer le backtest avec le nombre de barres specifie
