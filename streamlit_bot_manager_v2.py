@@ -158,6 +158,31 @@ def delete_ml_model(bot_name):
             return False, f"Erreur lors de la suppression du modèle ML: {e}"
     return True, "Aucun modèle ML à supprimer"
 
+# ===============================
+# GESTION DES LOGS
+# ===============================
+
+def ensure_log_directory():
+    """Crée le dossier log/ s'il n'existe pas"""
+    if not os.path.exists('log'):
+        os.makedirs('log')
+
+def get_log_file_path(bot_id):
+    """Retourne le chemin du fichier de log pour un bot donné"""
+    ensure_log_directory()
+    return f'log/bot_{bot_id}_live.log'
+
+def delete_log_file(bot_id):
+    """Supprime le fichier de log d'un bot"""
+    log_path = get_log_file_path(bot_id)
+    if os.path.exists(log_path):
+        try:
+            os.remove(log_path)
+            return True, f"Fichier de log '{log_path}' supprimé"
+        except Exception as e:
+            return False, f"Erreur lors de la suppression du log: {e}"
+    return True, "Aucun fichier de log à supprimer"
+
 def load_bots_config():
     """Charge la configuration des bots"""
     if os.path.exists('bots_config.json'):
@@ -191,7 +216,7 @@ def add_bot(name, login, password, server, symbol, timeframe, config_name):
     return bot_id
 
 def remove_bot(bot_id):
-    """Supprime un bot et son modèle ML associé"""
+    """Supprime un bot, son modèle ML associé et son fichier de log"""
     bots_config = load_bots_config()
 
     # Récupérer le nom du bot avant de le supprimer
@@ -208,6 +233,9 @@ def remove_bot(bot_id):
     # Supprimer le modèle ML associé
     if bot_name:
         delete_ml_model(bot_name)
+
+    # Supprimer le fichier de log associé
+    delete_log_file(bot_id)
 
 def update_bot(bot_id, name, login, password, server, symbol, timeframe, config_name):
     """Met à jour les informations d'un bot"""
@@ -655,7 +683,7 @@ with tab1:
                                     json.dump(temp_creds, f, indent=4)
 
                                 # Lancer le bot
-                                log_file_path = f'bot_{bot_id}_live.log'
+                                log_file_path = get_log_file_path(bot_id)
                                 log_file = open(log_file_path, 'w', buffering=1)
 
                                 # Préparer le chemin du modèle ML pour ce bot
@@ -744,7 +772,7 @@ with tab1:
 
                 # Afficher les logs du bot (seulement si pas en édition)
                 if not is_editing:
-                    log_file_path = f'bot_{bot_id}_live.log'
+                    log_file_path = get_log_file_path(bot_id)
                     if os.path.exists(log_file_path):
                         with st.expander("📋 Logs du Bot", expanded=False):
                             try:

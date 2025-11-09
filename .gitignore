@@ -4,10 +4,16 @@ telegram_credentials.json
 
 # Configuration files with sensitive data
 bot_config.json
+bots_config.json
+
+# Configuration and data directories
+config/
+backtest/
+machineLearning/
+log/
 
 # Private documents
 Commandes
-backtest/
 
 # Python
 __pycache__/
@@ -50,9 +56,6 @@ ENV/
 
 # Logs
 *.log
-
-# Backtest results (optional - uncomment if you want to exclude them)
-# backtest/*.json
 
 # OS
 .DS_Store
