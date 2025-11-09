@@ -109,7 +109,7 @@ RR_DEFAULT = 1.3
 
 # ML Meta-Labelling avec Rolling Window
 USE_ML_META_LABELLING = True
-ML_MODEL_PATH = "ict_model.pkl"
+ML_MODEL_PATH = "ict_model.pkl",
 MAX_ML_SAMPLES = 500
 
 # Kill Zones (heures Paris)
@@ -557,6 +557,11 @@ class MLFilter:
         if not self.enabled or not self.model_path or not self.is_trained:
             return False
         try:
+            # Créer le dossier parent si nécessaire
+            model_dir = os.path.dirname(self.model_path)
+            if model_dir and not os.path.exists(model_dir):
+                os.makedirs(model_dir)
+
             saved_data = {
                 'model': self.model,
                 'X': self.X,
@@ -1044,7 +1049,7 @@ def place_market_order(symbol, side, sl, tp, info, df=None):
 
     return True, f"ticket={res.order or res.deal}"
 
-def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1"):
+def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path="ict_model.pkl"):
     info = ensure_mt5_and_symbol(symbol)
     tf_code = MT5_TF_MAP.get(timeframe, mt5.TIMEFRAME_M1)
     pip = get_pip_size_from_info(info)
@@ -1070,7 +1075,7 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1"):
     df_initial = enrich(df_initial)
 
     print(f"[LIVE] Lancement du backtest initial pour entrainer le modele ML...")
-    ml = MLFilter(model_path=ML_MODEL_PATH, use_meta_labelling=USE_ML_META_LABELLING)
+    ml = MLFilter(model_path=ml_model_path, use_meta_labelling=USE_ML_META_LABELLING)
 
     if USE_ML_META_LABELLING:
         # Faire un backtest rapide pour entraîner le ML
@@ -1282,10 +1287,15 @@ def main():
                         help="Nombre de barres")
     parser.add_argument("--no-plot", action="store_true",
                         help="Désactiver l'affichage des graphiques")
+    parser.add_argument("--bot-name", type=str, default=None,
+                        help="Nom du bot (pour le modèle ML)")
+    parser.add_argument("--ml-model-path", type=str, default="ict_model.pkl",
+                        help="Chemin du fichier modèle ML")
     args = parser.parse_args()
 
     symbol = args.symbol
     timeframe = args.timeframe.upper()
+    ml_model_path = args.ml_model_path
 
     if args.bars is None:
         bars = BARS_PER_TIMEFRAME.get(timeframe, BARS_DEFAULT)
@@ -1325,7 +1335,7 @@ def main():
                 # CORRECTION: Le --no-plot ne doit PAS désactiver le ML
                 ml_enabled = USE_ML_META_LABELLING
                 ml_filter = MLFilter(
-                    model_path=ML_MODEL_PATH if ml_enabled else None,
+                    model_path=ml_model_path if ml_enabled else None,
                     use_meta_labelling=ml_enabled
                 )
 
@@ -1418,7 +1428,7 @@ def main():
         else:
             print("Connexion MT5 échouée.")
     elif args.mode == "live":
-        live_loop(symbol=symbol, timeframe=timeframe)
+        live_loop(symbol=symbol, timeframe=timeframe, ml_model_path=ml_model_path)
     elif args.mode == "dashboard":
         launch_tk_dashboard(symbol=symbol, timeframe=timeframe)
     elif args.mode == "streamlit":

@@ -1,0 +1,34 @@
+{
+    "bots": [
+        {
+            "id": "69289cc6",
+            "name": "BTCUSD N\u00b01",
+            "login": 223550,
+            "password": "a1234567@A",
+            "server": "FusionMarkets-Demo",
+            "symbol": "BTCUSD",
+            "timeframe": "M5",
+            "config_name": "Default"
+        },
+        {
+            "id": "e342b195",
+            "name": "Singe1",
+            "login": 223550,
+            "password": "a1234567@A",
+            "server": "FusionMarkets-Demo",
+            "symbol": "BTCUSD",
+            "timeframe": "M5",
+            "config_name": "Singe"
+        },
+        {
+            "id": "4228bb07",
+            "name": "Singe2",
+            "login": 223550,
+            "password": "a1234567@A",
+            "server": "FusionMarkets-Demo",
+            "symbol": "ETHUSD",
+            "timeframe": "M5",
+            "config_name": "Singe"
+        }
+    ]
+}

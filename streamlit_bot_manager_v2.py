@@ -1,9 +1,9 @@
 """
 Interface Streamlit AVANCEE pour manager le bot de trading ICT
+- Gestion multi-bots
 - Suivi temps reel
 - Affichage des trades en cours
-- Connexion MT5 directe
-- Gestion des comptes MT5
+- Connexion MT5 directe par bot
 - Backtest integre
 """
 
@@ -16,6 +16,7 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import uuid
 
 # Import MT5
 try:
@@ -30,46 +31,229 @@ except:
 # ===============================
 
 def save_config_to_file(config):
-    """Sauvegarde la configuration dans un fichier JSON"""
+    """Sauvegarde la configuration dans un fichier JSON (legacy - pour compatibilité)"""
     with open('bot_config.json', 'w') as f:
         json.dump(config, f, indent=4)
 
-def load_mt5_credentials():
-    """Charge les identifiants MT5 depuis un fichier"""
-    if os.path.exists('mt5_credentials.json'):
-        with open('mt5_credentials.json', 'r') as f:
+# ===============================
+# GESTION DES CONFIGURATIONS
+# ===============================
+
+def ensure_config_directory():
+    """Crée le dossier config/ s'il n'existe pas"""
+    if not os.path.exists('config'):
+        os.makedirs('config')
+
+def create_default_config():
+    """Crée la configuration par défaut si elle n'existe pas"""
+    ensure_config_directory()
+    default_config_path = 'config/Default.json'
+
+    if not os.path.exists(default_config_path):
+        default_config = {
+            'RISK_PER_TRADE': 0.01,
+            'RR_TAKE_PROFIT': 1.8,
+            'MAX_CONCURRENT_TRADES': 2,
+            'COOLDOWN_BARS': 5,
+            'ML_THRESHOLD': 0.40,
+            'USE_SESSION_ADAPTIVE_RR': True,
+            'RR_LONDON': 1.2,
+            'RR_NEWYORK': 1.5,
+            'RR_DEFAULT': 1.3,
+            'USE_ML_META_LABELLING': True,
+            'MAX_ML_SAMPLES': 500,
+            'USE_ATR_FILTER': True,
+            'ATR_FVG_MIN_RATIO': 0.2,
+            'ATR_FVG_MAX_RATIO': 2.5,
+            'USE_CIRCUIT_BREAKER': True,
+            'DAILY_DD_LIMIT': 0.03,
+            'USE_ADAPTIVE_RISK': True
+        }
+        with open(default_config_path, 'w') as f:
+            json.dump(default_config, f, indent=4)
+
+    return default_config_path
+
+def load_configs_list():
+    """Retourne la liste des noms de configurations disponibles"""
+    ensure_config_directory()
+    create_default_config()  # Créer Default si inexistant
+
+    configs = []
+    for file in os.listdir('config'):
+        if file.endswith('.json'):
+            configs.append(file.replace('.json', ''))
+
+    return sorted(configs)
+
+def load_config_by_name(config_name):
+    """Charge une configuration par son nom"""
+    config_path = f'config/{config_name}.json'
+
+    if not os.path.exists(config_path):
+        # Si la config n'existe pas, créer Default et la retourner
+        create_default_config()
+        config_path = 'config/Default.json'
+
+    with open(config_path, 'r') as f:
+        return json.load(f)
+
+def save_config_by_name(config_name, config):
+    """Sauvegarde une configuration avec un nom donné"""
+    ensure_config_directory()
+    config_path = f'config/{config_name}.json'
+
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=4)
+
+def delete_config(config_name):
+    """Supprime une configuration (sauf Default)"""
+    if config_name == 'Default':
+        return False, "Impossible de supprimer la configuration Default"
+
+    config_path = f'config/{config_name}.json'
+
+    if os.path.exists(config_path):
+        os.remove(config_path)
+        return True, f"Configuration '{config_name}' supprimée"
+    else:
+        return False, f"Configuration '{config_name}' introuvable"
+
+def get_bots_using_config(config_name):
+    """Retourne la liste des bots qui utilisent une config donnée"""
+    bots_config = load_bots_config()
+    bots_using = []
+
+    for bot in bots_config.get('bots', []):
+        if bot.get('config_name') == config_name:
+            bots_using.append(bot['name'])
+
+    return bots_using
+
+# ===============================
+# GESTION DES MODÈLES ML
+# ===============================
+
+def ensure_ml_directory():
+    """Crée le dossier machineLearning/ s'il n'existe pas"""
+    if not os.path.exists('machineLearning'):
+        os.makedirs('machineLearning')
+
+def get_ml_model_path(bot_name):
+    """Retourne le chemin du fichier .pkl pour un bot donné"""
+    ensure_ml_directory()
+    # Nettoyer le nom du bot pour le nom de fichier (supprimer les caractères spéciaux)
+    safe_name = "".join(c for c in bot_name if c.isalnum() or c in (' ', '-', '_')).strip()
+    safe_name = safe_name.replace(' ', '_')
+    return f'machineLearning/{safe_name}.pkl'
+
+def delete_ml_model(bot_name):
+    """Supprime le fichier .pkl d'un bot"""
+    ml_path = get_ml_model_path(bot_name)
+    if os.path.exists(ml_path):
+        try:
+            os.remove(ml_path)
+            return True, f"Modèle ML '{ml_path}' supprimé"
+        except Exception as e:
+            return False, f"Erreur lors de la suppression du modèle ML: {e}"
+    return True, "Aucun modèle ML à supprimer"
+
+def load_bots_config():
+    """Charge la configuration des bots"""
+    if os.path.exists('bots_config.json'):
+        with open('bots_config.json', 'r') as f:
             return json.load(f)
-    # Fichier non trouvé - retourner valeurs vides
-    return {"login": None, "password": None, "server": None}
+    return {"bots": []}
 
-def save_mt5_credentials(login, password, server):
-    """Sauvegarde les identifiants MT5"""
-    creds = {"login": login, "password": password, "server": server}
-    with open('mt5_credentials.json', 'w') as f:
-        json.dump(creds, f, indent=4)
-    return creds
+def save_bots_config(bots_config):
+    """Sauvegarde la configuration des bots"""
+    with open('bots_config.json', 'w') as f:
+        json.dump(bots_config, f, indent=4)
 
-def connect_mt5(login, password, server):
-    """Connexion a MT5"""
+def add_bot(name, login, password, server, symbol, timeframe, config_name):
+    """Ajoute un nouveau bot"""
+    bots_config = load_bots_config()
+    bot_id = str(uuid.uuid4())[:8]
+
+    new_bot = {
+        "id": bot_id,
+        "name": name,
+        "login": login,
+        "password": password,
+        "server": server,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "config_name": config_name
+    }
+
+    bots_config["bots"].append(new_bot)
+    save_bots_config(bots_config)
+    return bot_id
+
+def remove_bot(bot_id):
+    """Supprime un bot et son modèle ML associé"""
+    bots_config = load_bots_config()
+
+    # Récupérer le nom du bot avant de le supprimer
+    bot_name = None
+    for bot in bots_config["bots"]:
+        if bot["id"] == bot_id:
+            bot_name = bot["name"]
+            break
+
+    # Supprimer le bot de la config
+    bots_config["bots"] = [b for b in bots_config["bots"] if b["id"] != bot_id]
+    save_bots_config(bots_config)
+
+    # Supprimer le modèle ML associé
+    if bot_name:
+        delete_ml_model(bot_name)
+
+def update_bot(bot_id, name, login, password, server, symbol, timeframe, config_name):
+    """Met à jour les informations d'un bot"""
+    bots_config = load_bots_config()
+    for bot in bots_config["bots"]:
+        if bot["id"] == bot_id:
+            bot["name"] = name
+            bot["login"] = login
+            bot["password"] = password
+            bot["server"] = server
+            bot["symbol"] = symbol
+            bot["timeframe"] = timeframe
+            bot["config_name"] = config_name
+            break
+    save_bots_config(bots_config)
+    return True
+
+def connect_mt5_bot(login, password, server):
+    """Connexion a MT5 pour un bot specifique"""
     if not MT5_AVAILABLE:
         return False, "MT5 non disponible"
 
-    if mt5.initialize(login=login, password=password, server=server):
+    # Fermer toute connexion existante
+    mt5.shutdown()
+
+    if mt5.initialize(login=int(login), password=password, server=server):
         return True, "Connexion reussie"
     else:
         error = mt5.last_error()
         return False, f"Erreur: {error}"
 
-def get_mt5_account_info():
-    """Recupere les infos du compte MT5"""
-    if not MT5_AVAILABLE or not mt5.terminal_info():
+def get_mt5_account_info_bot(login, password, server):
+    """Recupere les infos du compte MT5 pour un bot specifique"""
+    if not MT5_AVAILABLE:
+        return None
+
+    # Se connecter au compte specifique
+    success, msg = connect_mt5_bot(login, password, server)
+    if not success:
         return None
 
     account = mt5.account_info()
     if account is None:
         return None
 
-    return {
+    info = {
         'balance': account.balance,
         'equity': account.equity,
         'margin': account.margin,
@@ -82,13 +266,22 @@ def get_mt5_account_info():
         'login': account.login
     }
 
-def get_open_positions():
-    """Recupere les positions ouvertes sur MT5"""
-    if not MT5_AVAILABLE or not mt5.terminal_info():
+    mt5.shutdown()
+    return info
+
+def get_open_positions_bot(login, password, server):
+    """Recupere les positions ouvertes pour un bot specifique"""
+    if not MT5_AVAILABLE:
+        return []
+
+    # Se connecter au compte specifique
+    success, msg = connect_mt5_bot(login, password, server)
+    if not success:
         return []
 
     positions = mt5.positions_get()
     if positions is None or len(positions) == 0:
+        mt5.shutdown()
         return []
 
     pos_list = []
@@ -107,6 +300,7 @@ def get_open_positions():
             'time': datetime.fromtimestamp(pos.time)
         })
 
+    mt5.shutdown()
     return pos_list
 
 def get_recent_deals(hours=24):
@@ -162,28 +356,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialisation de la session state
-if 'bot_running' not in st.session_state:
-    st.session_state.bot_running = False
-if 'bot_process' not in st.session_state:
-    st.session_state.bot_process = None
-if 'mt5_connected' not in st.session_state:
-    st.session_state.mt5_connected = False
-if 'mt5_credentials' not in st.session_state:
-    st.session_state.mt5_credentials = load_mt5_credentials()
+# Initialisation de la session state pour multi-bots
+if 'bots' not in st.session_state:
+    st.session_state.bots = {}  # Dictionnaire: {bot_id: {process, log_file, running}}
 
-# Verifier si le processus du bot est toujours vivant
-if st.session_state.bot_process is not None:
-    if st.session_state.bot_process.poll() is not None:
-        # Le processus s'est termine
-        st.session_state.bot_running = False
-        st.session_state.bot_process = None
-        if 'bot_log_file' in st.session_state and st.session_state.bot_log_file:
-            try:
-                st.session_state.bot_log_file.close()
-            except:
-                pass
-            st.session_state.bot_log_file = None
+if 'bots_config' not in st.session_state:
+    st.session_state.bots_config = load_bots_config()
+
+if 'editing_bot_id' not in st.session_state:
+    st.session_state.editing_bot_id = None  # ID du bot en cours d'édition
+
+# Verifier si les processus des bots sont toujours vivants
+for bot_id in list(st.session_state.bots.keys()):
+    bot_state = st.session_state.bots[bot_id]
+    if bot_state['process'] is not None:
+        if bot_state['process'].poll() is not None:
+            # Le processus s'est termine
+            bot_state['running'] = False
+            bot_state['process'] = None
+            if bot_state.get('log_file'):
+                try:
+                    bot_state['log_file'].close()
+                except:
+                    pass
+                bot_state['log_file'] = None
 
 if 'config' not in st.session_state:
     st.session_state.config = {
@@ -216,134 +412,21 @@ st.markdown("### Centre de Controle Avance avec Suivi Temps Reel")
 st.markdown("---")
 
 # ===============================
-# SIDEBAR - CONNEXION MT5
+# SIDEBAR - INFORMATIONS
 # ===============================
 with st.sidebar:
-    st.header("🔌 Connexion MT5")
+    st.header("📊 Informations")
 
-    with st.expander("⚙️ Parametres de Connexion", expanded=not st.session_state.mt5_connected):
-        mt5_login = st.number_input(
-            "Login",
-            value=st.session_state.mt5_credentials.get('login') or 0,
-            step=1
-        )
-        mt5_password = st.text_input(
-            "Password",
-            value=st.session_state.mt5_credentials.get('password', ''),
-            type="password"
-        )
-        mt5_server = st.text_input(
-            "Server",
-            value=st.session_state.mt5_credentials.get('server', '')
-        )
+    # Compter les bots actifs
+    active_bots = sum(1 for bot_id in st.session_state.bots if st.session_state.bots[bot_id].get('running', False))
+    total_bots = len(st.session_state.bots_config.get('bots', []))
 
-        col_conn1, col_conn2 = st.columns(2)
-        with col_conn1:
-            if st.button("🔌 Connecter", use_container_width=True):
-                success, msg = connect_mt5(mt5_login, mt5_password, mt5_server)
-                if success:
-                    st.session_state.mt5_connected = True
-                    st.session_state.mt5_credentials = save_mt5_credentials(mt5_login, mt5_password, mt5_server)
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
-
-        with col_conn2:
-            if st.button("💾 Sauvegarder", use_container_width=True):
-                st.session_state.mt5_credentials = save_mt5_credentials(mt5_login, mt5_password, mt5_server)
-                st.success("Sauvegarde OK")
-
-    # Statut MT5
-    if st.session_state.mt5_connected and MT5_AVAILABLE and mt5.terminal_info():
-        st.success("✅ MT5 Connecte")
-        account_info = get_mt5_account_info()
-        if account_info:
-            st.metric("Balance", f"${account_info['balance']:,.2f}")
-            st.metric("Equity", f"${account_info['equity']:,.2f}")
-            st.metric("Profit", f"${account_info['profit']:,.2f}")
-    else:
-        st.error("❌ MT5 Deconnecte")
+    st.metric("Bots Configures", total_bots)
+    st.metric("Bots Actifs", active_bots)
 
     st.markdown("---")
-
-    # ===============================
-    # CONTROLES DU BOT
-    # ===============================
-    st.header("🎛️ Controles du Bot")
-
-    if st.session_state.bot_running:
-        if st.button("⏸️ PAUSE BOT", type="primary", use_container_width=True):
-            if st.session_state.bot_process:
-                st.session_state.bot_process.terminate()
-                st.session_state.bot_process = None
-            if 'bot_log_file' in st.session_state and st.session_state.bot_log_file:
-                try:
-                    st.session_state.bot_log_file.close()
-                except:
-                    pass
-                st.session_state.bot_log_file = None
-            st.session_state.bot_running = False
-            st.success("Bot arrete")
-            st.rerun()
-    else:
-        if st.button("▶️ START BOT", type="primary", use_container_width=True):
-            if not st.session_state.mt5_connected:
-                st.error("Connectez-vous d'abord a MT5 !")
-            else:
-                save_config_to_file(st.session_state.config)
-
-                # Rediriger les logs vers un fichier avec unbuffered mode
-                log_file = open('bot_live.log', 'w', buffering=1)
-                st.session_state.bot_process = subprocess.Popen(
-                    ["python", "-u", "ict_bot_all_in_one.py", "--mode", "live"],
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1
-                )
-                st.session_state.bot_running = True
-                st.session_state.bot_log_file = log_file
-                st.success("Bot demarre - Attendez quelques secondes puis cliquez sur 'Rafraichir'")
-                st.rerun()
-
-    # Statut
-    st.markdown("---")
-    st.subheader("📊 Statut")
-    if st.session_state.bot_running:
-        st.success("✅ Bot EN COURS")
-    else:
-        st.error("❌ Bot ARRETE")
 
     st.info(f"⏰ {datetime.now().strftime('%H:%M:%S')}")
-
-    # Afficher les logs du bot si disponibles
-    if st.session_state.bot_running or os.path.exists('bot_live.log'):
-        with st.expander("📋 Logs du Bot", expanded=True):
-            try:
-                if os.path.exists('bot_live.log'):
-                    # Forcer le flush du fichier de log si ouvert
-                    if 'bot_log_file' in st.session_state and st.session_state.bot_log_file:
-                        try:
-                            st.session_state.bot_log_file.flush()
-                            os.fsync(st.session_state.bot_log_file.fileno())
-                        except:
-                            pass
-
-                    with open('bot_live.log', 'r', encoding='utf-8', errors='ignore') as f:
-                        logs = f.read()
-                        logs_stripped = logs.strip()
-                        if logs_stripped:
-                            # Afficher seulement les dernières 100 lignes
-                            lines = logs.split('\n')
-                            recent_logs = '\n'.join(lines[-100:])
-                            st.code(recent_logs, language='text')
-                        else:
-                            st.info(f"Aucun log disponible pour le moment... (taille fichier: {len(logs)} bytes)")
-                else:
-                    st.info("Aucun log disponible")
-            except Exception as e:
-                st.warning(f"Impossible de lire les logs: {e}")
 
     if st.button("🔄 Rafraichir", use_container_width=True):
         st.rerun()
@@ -351,217 +434,519 @@ with st.sidebar:
 # ===============================
 # ONGLETS PRINCIPAUX
 # ===============================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard Live", "⚙️ Parametres", "🧪 Backtest", "📈 Historique"])
+tab1, tab2, tab3, tab4 = st.tabs(["🤖 Gestion des Bots", "⚙️ Parametres", "🧪 Backtest", "📈 Historique"])
 
 # ===============================
-# TAB 1: DASHBOARD LIVE
+# TAB 1: GESTION DES BOTS
 # ===============================
 with tab1:
-    st.header("📊 Dashboard Live")
+    st.header("🤖 Gestion des Bots")
 
-    if not st.session_state.mt5_connected:
-        st.warning("⚠️ Connectez-vous a MT5 pour voir les donnees en temps reel")
-    else:
-        # Infos compte
-        account_info = get_mt5_account_info()
-        if account_info:
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("Balance", f"${account_info['balance']:,.2f}")
-            with col2:
-                st.metric("Equity", f"${account_info['equity']:,.2f}")
-            with col3:
-                profit_delta = account_info['profit']
-                st.metric("Profit", f"${profit_delta:,.2f}", delta=f"{profit_delta:,.2f}")
-            with col4:
-                st.metric("Marge Libre", f"${account_info['free_margin']:,.2f}")
-            with col5:
-                st.metric("Levier", f"1:{account_info['leverage']}")
+    # ===============================
+    # SECTION: AJOUTER UN BOT
+    # ===============================
+    with st.expander("➕ Ajouter un nouveau bot", expanded=len(st.session_state.bots_config.get('bots', [])) == 0):
+        st.subheader("Configuration du nouveau bot")
 
-        st.markdown("---")
+        # Charger la liste des configs disponibles
+        available_configs = load_configs_list()
 
-        # Positions ouvertes
-        st.subheader("📍 Positions Ouvertes")
-        positions = get_open_positions()
+        col_form1, col_form2 = st.columns(2)
 
-        if len(positions) > 0:
-            df_positions = pd.DataFrame(positions)
-            df_positions['profit_color'] = df_positions['profit'].apply(
-                lambda x: '🟢' if x > 0 else '🔴' if x < 0 else '⚪'
+        with col_form1:
+            bot_name = st.text_input("Nom du bot", placeholder="Ex: Bot EURUSD", key="add_bot_name")
+            bot_login = st.number_input("Login MT5", min_value=0, step=1, value=0, key="add_bot_login")
+            bot_password = st.text_input("Password MT5", type="password", key="add_bot_password")
+            bot_server = st.text_input("Server MT5", placeholder="Ex: FusionMarkets-Demo", key="add_bot_server")
+
+        with col_form2:
+            bot_symbol = st.selectbox(
+                "Symbole",
+                ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'],
+                key="add_bot_symbol"
+            )
+            bot_timeframe = st.selectbox("Timeframe", ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'], index=1, key="add_bot_timeframe")
+            bot_config = st.selectbox(
+                "⚙️ Configuration",
+                available_configs,
+                index=0 if 'Default' in available_configs else 0,
+                key="add_bot_config",
+                help="Sélectionnez la stratégie de trading à utiliser"
             )
 
-            # Afficher les positions
-            for idx, pos in enumerate(positions):
-                with st.expander(
-                    f"{pos['profit_color']} {pos['type']} {pos['symbol']} | "
-                    f"Ticket: {pos['ticket']} | "
-                    f"Profit: ${pos['profit']:,.2f}",
-                    expanded=True
-                ):
-                    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
-                    with col_p1:
-                        st.metric("Volume", f"{pos['volume']:.2f} lots")
-                        st.metric("Prix Entree", f"{pos['price_open']:.5f}")
-                    with col_p2:
-                        st.metric("Prix Actuel", f"{pos['price_current']:.5f}")
-                        pips = (pos['price_current'] - pos['price_open']) * 10000
-                        if pos['type'] == 'SELL':
-                            pips = -pips
-                        st.metric("Pips", f"{pips:,.1f}")
-                    with col_p3:
-                        st.metric("Stop Loss", f"{pos['sl']:.5f}" if pos['sl'] > 0 else "N/A")
-                        st.metric("Take Profit", f"{pos['tp']:.5f}" if pos['tp'] > 0 else "N/A")
-                    with col_p4:
-                        st.metric("Profit", f"${pos['profit']:,.2f}")
-                        st.caption(f"Ouvert: {pos['time'].strftime('%Y-%m-%d %H:%M')}")
-        else:
-            st.info("Aucune position ouverte")
-
-        st.markdown("---")
-
-        # Trades recents
-        st.subheader("🕐 Trades Recents (24h)")
-        deals = get_recent_deals(hours=24)
-
-        if len(deals) > 0:
-            df_deals = pd.DataFrame(deals)
-            st.dataframe(
-                df_deals[['time', 'symbol', 'type', 'volume', 'price', 'profit']],
-                use_container_width=True,
-                hide_index=True
-            )
-
-            # Stats rapides
-            total_profit = df_deals['profit'].sum()
-            winning_trades = len(df_deals[df_deals['profit'] > 0])
-            total_trades = len(df_deals)
-            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
-
-            col_st1, col_st2, col_st3 = st.columns(3)
-            with col_st1:
-                st.metric("Profit 24h", f"${total_profit:,.2f}")
-            with col_st2:
-                st.metric("Trades", total_trades)
-            with col_st3:
-                st.metric("Win Rate 24h", f"{win_rate:.1f}%")
-        else:
-            st.info("Aucun trade dans les dernieres 24h")
-
-# ===============================
-# TAB 2: PARAMETRES
-# ===============================
-with tab2:
-    st.header("⚙️ Configuration du Bot")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("🎯 Risque & Money Management")
-        st.session_state.config['RISK_PER_TRADE'] = st.slider(
-            "Risque par trade (%)",
-            min_value=0.001,
-            max_value=0.05,
-            value=st.session_state.config['RISK_PER_TRADE'],
-            step=0.001,
-            format="%.3f"
-        )
-
-        st.session_state.config['RR_TAKE_PROFIT'] = st.slider(
-            "Risk/Reward",
-            min_value=1.0,
-            max_value=3.0,
-            value=st.session_state.config['RR_TAKE_PROFIT'],
-            step=0.1
-        )
-
-        st.session_state.config['MAX_CONCURRENT_TRADES'] = st.slider(
-            "Max trades concurrents",
-            min_value=1,
-            max_value=5,
-            value=st.session_state.config['MAX_CONCURRENT_TRADES']
-        )
-
-        st.session_state.config['COOLDOWN_BARS'] = st.slider(
-            "Cooldown (barres)",
-            min_value=1,
-            max_value=20,
-            value=st.session_state.config['COOLDOWN_BARS']
-        )
-
-    with col2:
-        st.subheader("🧠 Machine Learning")
-        st.session_state.config['USE_ML_META_LABELLING'] = st.checkbox(
-            "Activer ML Meta-Labelling",
-            value=st.session_state.config['USE_ML_META_LABELLING']
-        )
-
-        if st.session_state.config['USE_ML_META_LABELLING']:
-            st.session_state.config['ML_THRESHOLD'] = st.slider(
-                "Seuil ML",
-                min_value=0.0,
-                max_value=1.0,
-                value=st.session_state.config['ML_THRESHOLD'],
-                step=0.05
-            )
-
-            st.session_state.config['MAX_ML_SAMPLES'] = st.slider(
-                "Max echantillons ML",
-                min_value=100,
-                max_value=1000,
-                value=st.session_state.config['MAX_ML_SAMPLES'],
-                step=50
-            )
-
-        st.subheader("📈 RR Adaptatif")
-        st.session_state.config['USE_SESSION_ADAPTIVE_RR'] = st.checkbox(
-            "RR adaptatif par session",
-            value=st.session_state.config['USE_SESSION_ADAPTIVE_RR']
-        )
-
-        if st.session_state.config['USE_SESSION_ADAPTIVE_RR']:
-            st.session_state.config['RR_LONDON'] = st.slider(
-                "RR London", 1.0, 2.5, st.session_state.config['RR_LONDON'], 0.1
-            )
-            st.session_state.config['RR_NEWYORK'] = st.slider(
-                "RR New York", 1.0, 2.5, st.session_state.config['RR_NEWYORK'], 0.1
-            )
-
-    with col3:
-        st.subheader("🔧 Filtres & Protection")
-        st.session_state.config['USE_ATR_FILTER'] = st.checkbox(
-            "Filtre ATR",
-            value=st.session_state.config['USE_ATR_FILTER']
-        )
-
-        if st.session_state.config['USE_ATR_FILTER']:
-            st.session_state.config['ATR_FVG_MIN_RATIO'] = st.slider(
-                "ATR Min", 0.1, 1.0, st.session_state.config['ATR_FVG_MIN_RATIO'], 0.05
-            )
-            st.session_state.config['ATR_FVG_MAX_RATIO'] = st.slider(
-                "ATR Max", 1.0, 5.0, st.session_state.config['ATR_FVG_MAX_RATIO'], 0.1
-            )
-
-        st.session_state.config['USE_CIRCUIT_BREAKER'] = st.checkbox(
-            "Circuit Breaker",
-            value=st.session_state.config['USE_CIRCUIT_BREAKER']
-        )
-
-        if st.session_state.config['USE_CIRCUIT_BREAKER']:
-            st.session_state.config['DAILY_DD_LIMIT'] = st.slider(
-                "Limite DD journalier",
-                0.01, 0.10, st.session_state.config['DAILY_DD_LIMIT'], 0.01,
-                format="%.2f"
-            )
-
-        st.session_state.config['USE_ADAPTIVE_RISK'] = st.checkbox(
-            "Risque Adaptatif",
-            value=st.session_state.config['USE_ADAPTIVE_RISK']
-        )
+        col_btn1, col_btn2 = st.columns([1, 3])
+        with col_btn1:
+            if st.button("✅ Ajouter le Bot", type="primary", use_container_width=True, key="add_bot_button"):
+                if not bot_name or not bot_password or not bot_server:
+                    st.error("⚠️ Veuillez remplir tous les champs")
+                elif bot_login == 0:
+                    st.error("⚠️ Le login MT5 doit être valide")
+                else:
+                    # Tester la connexion MT5
+                    success, msg = connect_mt5_bot(bot_login, bot_password, bot_server)
+                    if success:
+                        bot_id = add_bot(bot_name, bot_login, bot_password, bot_server, bot_symbol, bot_timeframe, bot_config)
+                        st.session_state.bots_config = load_bots_config()
+                        st.session_state.bots[bot_id] = {'process': None, 'log_file': None, 'running': False}
+                        st.success(f"✅ Bot '{bot_name}' ajouté avec succès avec la config '{bot_config}' ! (ID: {bot_id})")
+                        mt5.shutdown()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Impossible de se connecter à MT5: {msg}")
 
     st.markdown("---")
-    if st.button("💾 Sauvegarder la Configuration", type="secondary", use_container_width=True):
-        save_config_to_file(st.session_state.config)
-        st.success("Configuration sauvegardee !")
+
+    # ===============================
+    # SECTION: LISTE DES BOTS
+    # ===============================
+    st.subheader("📋 Liste des Bots")
+
+    bots_list = st.session_state.bots_config.get('bots', [])
+
+    if len(bots_list) == 0:
+        st.info("👆 Aucun bot configuré. Ajoutez-en un ci-dessus !")
+    else:
+        for bot in bots_list:
+            bot_id = bot['id']
+
+            # Initialiser l'état du bot si nécessaire
+            if bot_id not in st.session_state.bots:
+                st.session_state.bots[bot_id] = {'process': None, 'log_file': None, 'running': False}
+
+            bot_state = st.session_state.bots[bot_id]
+            is_running = bot_state.get('running', False)
+
+            # Créer un expander pour chaque bot
+            status_icon = "🟢" if is_running else "⚪"
+            status_text = "EN COURS" if is_running else "ARRETE"
+
+            with st.expander(f"{status_icon} {bot['name']} - {bot['symbol']} ({bot['timeframe']}) - {status_text}", expanded=True):
+                # Vérifier si ce bot est en cours d'édition
+                is_editing = st.session_state.editing_bot_id == bot_id
+
+                if is_editing:
+                    # ===== MODE ÉDITION =====
+                    st.markdown("### ✏️ Modifier le Bot")
+
+                    # Charger la liste des configs disponibles
+                    available_configs_edit = load_configs_list()
+                    current_config = bot.get('config_name', 'Default')
+
+                    col_edit1, col_edit2 = st.columns(2)
+
+                    with col_edit1:
+                        edit_name = st.text_input("Nom du bot", value=bot['name'], key=f"edit_name_{bot_id}")
+                        edit_login = st.number_input("Login MT5", value=int(bot['login']), step=1, key=f"edit_login_{bot_id}")
+                        edit_password = st.text_input("Password MT5", value=bot['password'], type="password", key=f"edit_password_{bot_id}")
+                        edit_server = st.text_input("Server MT5", value=bot['server'], key=f"edit_server_{bot_id}")
+
+                    with col_edit2:
+                        edit_symbol = st.selectbox(
+                            "Symbole",
+                            ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'],
+                            index=['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'].index(bot['symbol']) if bot['symbol'] in ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'] else 0,
+                            key=f"edit_symbol_{bot_id}"
+                        )
+                        edit_timeframe = st.selectbox(
+                            "Timeframe",
+                            ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'],
+                            index=['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].index(bot['timeframe']) if bot['timeframe'] in ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'] else 1,
+                            key=f"edit_timeframe_{bot_id}"
+                        )
+                        edit_config = st.selectbox(
+                            "⚙️ Configuration",
+                            available_configs_edit,
+                            index=available_configs_edit.index(current_config) if current_config in available_configs_edit else 0,
+                            key=f"edit_config_{bot_id}",
+                            help="Sélectionnez la stratégie de trading à utiliser"
+                        )
+
+                    col_save, col_cancel = st.columns(2)
+
+                    with col_save:
+                        if st.button("💾 Sauvegarder", type="primary", use_container_width=True, key=f"save_edit_{bot_id}"):
+                            if not edit_name or not edit_password or not edit_server:
+                                st.error("⚠️ Veuillez remplir tous les champs")
+                            elif edit_login == 0:
+                                st.error("⚠️ Le login MT5 doit être valide")
+                            else:
+                                # Tester la connexion MT5
+                                success, msg = connect_mt5_bot(edit_login, edit_password, edit_server)
+                                if success:
+                                    update_bot(bot_id, edit_name, edit_login, edit_password, edit_server, edit_symbol, edit_timeframe, edit_config)
+                                    st.session_state.bots_config = load_bots_config()
+                                    st.session_state.editing_bot_id = None
+                                    st.success(f"✅ Bot '{edit_name}' mis à jour avec la config '{edit_config}' !")
+                                    mt5.shutdown()
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Impossible de se connecter à MT5: {msg}")
+
+                    with col_cancel:
+                        if st.button("❌ Annuler", type="secondary", use_container_width=True, key=f"cancel_edit_{bot_id}"):
+                            st.session_state.editing_bot_id = None
+                            st.rerun()
+
+                    st.markdown("---")
+
+                else:
+                    # ===== MODE AFFICHAGE =====
+                    # Informations du bot
+                    col_info1, col_info2, col_info3, col_info4, col_info5 = st.columns(5)
+
+                    with col_info1:
+                        st.metric("Nom", bot['name'])
+                        st.caption(f"ID: {bot_id}")
+
+                    with col_info2:
+                        st.metric("Compte MT5", bot['login'])
+                        st.caption(f"Server: {bot['server']}")
+
+                    with col_info3:
+                        st.metric("Symbole", bot['symbol'])
+                        st.caption(f"Timeframe: {bot['timeframe']}")
+
+                    with col_info4:
+                        config_name = bot.get('config_name', 'Default')
+                        st.metric("⚙️ Config", config_name)
+                        st.caption("Stratégie de trading")
+
+                    with col_info5:
+                        if is_running:
+                            st.success("✅ Bot actif")
+                        else:
+                            st.error("⏸️ Bot arrêté")
+
+                    st.markdown("---")
+
+                # Boutons de contrôle (seulement si pas en édition)
+                if not is_editing:
+                    col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
+
+                    with col_btn1:
+                        if is_running:
+                            if st.button(f"⏸️ Arrêter", key=f"stop_{bot_id}", type="secondary", use_container_width=True):
+                                if bot_state['process']:
+                                    bot_state['process'].terminate()
+                                    bot_state['process'] = None
+                                if bot_state.get('log_file'):
+                                    try:
+                                        bot_state['log_file'].close()
+                                    except:
+                                        pass
+                                    bot_state['log_file'] = None
+                                bot_state['running'] = False
+                                st.success(f"✅ Bot '{bot['name']}' arrêté")
+                                st.rerun()
+                        else:
+                            if st.button(f"▶️ Démarrer", key=f"start_{bot_id}", type="primary", use_container_width=True):
+                                # Charger et sauvegarder la config spécifique du bot
+                                config_name = bot.get('config_name', 'Default')
+                                bot_config = load_config_by_name(config_name)
+                                save_config_to_file(bot_config)  # Sauvegarder dans bot_config.json pour le bot
+
+                                # Créer un fichier de credentials temporaire pour ce bot
+                                temp_creds = {
+                                    "login": bot['login'],
+                                    "password": bot['password'],
+                                    "server": bot['server']
+                                }
+                                with open('mt5_credentials.json', 'w') as f:
+                                    json.dump(temp_creds, f, indent=4)
+
+                                # Lancer le bot
+                                log_file_path = f'bot_{bot_id}_live.log'
+                                log_file = open(log_file_path, 'w', buffering=1)
+
+                                # Préparer le chemin du modèle ML pour ce bot
+                                ml_model_path = get_ml_model_path(bot['name'])
+
+                                process = subprocess.Popen(
+                                    ["python", "-u", "ict_bot_all_in_one.py",
+                                     "--mode", "live",
+                                     "--symbol", bot['symbol'],
+                                     "--timeframe", bot['timeframe'],
+                                     "--bot-name", bot['name'],
+                                     "--ml-model-path", ml_model_path],
+                                    stdout=log_file,
+                                    stderr=subprocess.STDOUT,
+                                    text=True,
+                                    bufsize=1
+                                )
+
+                                bot_state['process'] = process
+                                bot_state['log_file'] = log_file
+                                bot_state['running'] = True
+
+                                st.success(f"✅ Bot '{bot['name']}' démarré avec la config '{config_name}' !")
+                                st.rerun()
+
+                    with col_btn2:
+                        # Bouton Modifier (seulement si le bot n'est pas en cours d'exécution)
+                        if not is_running:
+                            if st.button(f"✏️ Modifier", key=f"edit_{bot_id}", use_container_width=True):
+                                st.session_state.editing_bot_id = bot_id
+                                st.rerun()
+                        else:
+                            st.empty()  # Espace vide si le bot est en cours
+
+                    with col_btn3:
+                        if st.button(f"🗑️ Supprimer", key=f"delete_{bot_id}", type="secondary", use_container_width=True):
+                            # Arrêter le bot si en cours
+                            if is_running:
+                                if bot_state['process']:
+                                    bot_state['process'].terminate()
+                                if bot_state.get('log_file'):
+                                    try:
+                                        bot_state['log_file'].close()
+                                    except:
+                                        pass
+
+                            # Supprimer le bot
+                            remove_bot(bot_id)
+                            del st.session_state.bots[bot_id]
+                            st.session_state.bots_config = load_bots_config()
+                            st.success(f"✅ Bot '{bot['name']}' supprimé")
+                            st.rerun()
+
+                    with col_btn4:
+                        if st.button(f"📊 Infos MT5", key=f"info_{bot_id}", use_container_width=True):
+                            with st.spinner("Connexion à MT5..."):
+                                account_info = get_mt5_account_info_bot(bot['login'], bot['password'], bot['server'])
+                            if account_info:
+                                st.success("✅ Connexion MT5 réussie")
+
+                                # Afficher les informations sur plusieurs lignes pour une meilleure lisibilité
+                                st.markdown("#### 💰 Informations du Compte")
+
+                                col_mt5_1, col_mt5_2 = st.columns(2)
+                                with col_mt5_1:
+                                    st.markdown(f"**Balance:** `${account_info['balance']:,.2f} {account_info['currency']}`")
+                                    st.markdown(f"**Equity:** `${account_info['equity']:,.2f} {account_info['currency']}`")
+                                    st.markdown(f"**Profit:** `${account_info['profit']:,.2f} {account_info['currency']}`")
+
+                                with col_mt5_2:
+                                    st.markdown(f"**Marge Utilisée:** `${account_info['margin']:,.2f} {account_info['currency']}`")
+                                    st.markdown(f"**Marge Libre:** `${account_info['free_margin']:,.2f} {account_info['currency']}`")
+                                    st.markdown(f"**Levier:** `1:{account_info['leverage']}`")
+                            else:
+                                st.error("❌ Impossible de se connecter à MT5")
+
+                    with col_btn5:
+                        if st.button(f"📍 Positions", key=f"positions_{bot_id}", use_container_width=True):
+                            positions = get_open_positions_bot(bot['login'], bot['password'], bot['server'])
+                            if len(positions) > 0:
+                                st.write(f"**{len(positions)} position(s) ouverte(s)**")
+                                for pos in positions:
+                                    st.write(f"- {pos['type']} {pos['symbol']} | Volume: {pos['volume']} | Profit: ${pos['profit']:,.2f}")
+                            else:
+                                st.info("Aucune position ouverte")
+
+                # Afficher les logs du bot (seulement si pas en édition)
+                if not is_editing:
+                    log_file_path = f'bot_{bot_id}_live.log'
+                    if os.path.exists(log_file_path):
+                        with st.expander("📋 Logs du Bot", expanded=False):
+                            try:
+                                # Forcer le flush du fichier de log si ouvert
+                                if bot_state.get('log_file'):
+                                    try:
+                                        bot_state['log_file'].flush()
+                                        os.fsync(bot_state['log_file'].fileno())
+                                    except:
+                                        pass
+
+                                with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    logs = f.read()
+                                    logs_stripped = logs.strip()
+                                    if logs_stripped:
+                                        # Afficher seulement les dernières 50 lignes
+                                        lines = logs.split('\n')
+                                        recent_logs = '\n'.join(lines[-50:])
+                                        st.code(recent_logs, language='text')
+                                    else:
+                                        st.info("Aucun log disponible pour le moment...")
+                            except Exception as e:
+                                st.warning(f"Impossible de lire les logs: {e}")
+
+# ===============================
+# TAB 2: GESTIONNAIRE DE CONFIGURATIONS
+# ===============================
+with tab2:
+    st.header("⚙️ Gestionnaire de Configurations")
+
+    # State pour l'édition de config
+    if 'editing_config_name' not in st.session_state:
+        st.session_state.editing_config_name = None
+    if 'creating_new_config' not in st.session_state:
+        st.session_state.creating_new_config = False
+
+    # Charger la liste des configurations
+    available_configs = load_configs_list()
+
+    # ===============================
+    # SECTION: CRÉER UNE NOUVELLE CONFIG
+    # ===============================
+    with st.expander("➕ Créer une nouvelle configuration", expanded=st.session_state.creating_new_config):
+        new_config_name = st.text_input("Nom de la configuration", placeholder="Ex: Aggressive, Conservative, Scalping...", key="new_config_name")
+
+        if st.button("✅ Créer", type="primary", key="create_new_config_button"):
+            if not new_config_name:
+                st.error("⚠️ Veuillez entrer un nom de configuration")
+            elif new_config_name in available_configs:
+                st.error(f"⚠️ Une configuration '{new_config_name}' existe déjà")
+            else:
+                # Créer une copie de la config par défaut
+                default_config = load_config_by_name('Default')
+                save_config_by_name(new_config_name, default_config)
+                st.success(f"✅ Configuration '{new_config_name}' créée avec succès !")
+                st.session_state.creating_new_config = False
+                st.rerun()
+
+    st.markdown("---")
+
+    # ===============================
+    # SECTION: LISTE DES CONFIGURATIONS
+    # ===============================
+    st.subheader("📋 Liste des Configurations")
+
+    for config_name in available_configs:
+        bots_using = get_bots_using_config(config_name)
+        is_editing_config = st.session_state.editing_config_name == config_name
+
+        with st.expander(f"⚙️ {config_name} - {len(bots_using)} bot(s)", expanded=is_editing_config):
+            if is_editing_config:
+                # ===== MODE ÉDITION =====
+                st.markdown(f"### ✏️ Modifier la configuration '{config_name}'")
+
+                # Charger la config
+                config = load_config_by_name(config_name)
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.subheader("🎯 Risque & MM")
+                    config['RISK_PER_TRADE'] = st.slider(
+                        "Risque par trade (%)", 0.001, 0.05, config['RISK_PER_TRADE'], 0.001, format="%.3f", key=f"risk_{config_name}"
+                    )
+                    config['RR_TAKE_PROFIT'] = st.slider(
+                        "Risk/Reward", 1.0, 3.0, config['RR_TAKE_PROFIT'], 0.1, key=f"rr_{config_name}"
+                    )
+                    config['MAX_CONCURRENT_TRADES'] = st.slider(
+                        "Max trades", 1, 5, config['MAX_CONCURRENT_TRADES'], key=f"max_trades_{config_name}"
+                    )
+                    config['COOLDOWN_BARS'] = st.slider(
+                        "Cooldown", 1, 20, config['COOLDOWN_BARS'], key=f"cooldown_{config_name}"
+                    )
+
+                with col2:
+                    st.subheader("🧠 ML & RR Adaptatif")
+                    config['USE_ML_META_LABELLING'] = st.checkbox(
+                        "ML Meta-Labelling", config['USE_ML_META_LABELLING'], key=f"ml_use_{config_name}"
+                    )
+                    if config['USE_ML_META_LABELLING']:
+                        config['ML_THRESHOLD'] = st.slider(
+                            "Seuil ML", 0.0, 1.0, config['ML_THRESHOLD'], 0.05, key=f"ml_thresh_{config_name}"
+                        )
+                        config['MAX_ML_SAMPLES'] = st.slider(
+                            "Max samples ML", 100, 1000, config['MAX_ML_SAMPLES'], 50, key=f"ml_samples_{config_name}"
+                        )
+
+                    config['USE_SESSION_ADAPTIVE_RR'] = st.checkbox(
+                        "RR adaptatif", config['USE_SESSION_ADAPTIVE_RR'], key=f"rr_adapt_{config_name}"
+                    )
+                    if config['USE_SESSION_ADAPTIVE_RR']:
+                        config['RR_LONDON'] = st.slider(
+                            "RR London", 1.0, 2.5, config.get('RR_LONDON', 1.2), 0.1, key=f"rr_london_{config_name}"
+                        )
+                        config['RR_NEWYORK'] = st.slider(
+                            "RR NY", 1.0, 2.5, config.get('RR_NEWYORK', 1.5), 0.1, key=f"rr_ny_{config_name}"
+                        )
+                        config['RR_DEFAULT'] = st.slider(
+                            "RR Default", 1.0, 2.5, config.get('RR_DEFAULT', 1.3), 0.1, key=f"rr_default_{config_name}"
+                        )
+
+                with col3:
+                    st.subheader("🔧 Filtres")
+                    config['USE_ATR_FILTER'] = st.checkbox(
+                        "Filtre ATR", config['USE_ATR_FILTER'], key=f"atr_use_{config_name}"
+                    )
+                    if config['USE_ATR_FILTER']:
+                        config['ATR_FVG_MIN_RATIO'] = st.slider(
+                            "ATR Min", 0.1, 1.0, config['ATR_FVG_MIN_RATIO'], 0.05, key=f"atr_min_{config_name}"
+                        )
+                        config['ATR_FVG_MAX_RATIO'] = st.slider(
+                            "ATR Max", 1.0, 5.0, config['ATR_FVG_MAX_RATIO'], 0.1, key=f"atr_max_{config_name}"
+                        )
+
+                    config['USE_CIRCUIT_BREAKER'] = st.checkbox(
+                        "Circuit Breaker", config['USE_CIRCUIT_BREAKER'], key=f"cb_use_{config_name}"
+                    )
+                    if config['USE_CIRCUIT_BREAKER']:
+                        config['DAILY_DD_LIMIT'] = st.slider(
+                            "DD journalier", 0.01, 0.10, config['DAILY_DD_LIMIT'], 0.01, format="%.2f", key=f"dd_limit_{config_name}"
+                        )
+
+                    config['USE_ADAPTIVE_RISK'] = st.checkbox(
+                        "Risque Adaptatif", config['USE_ADAPTIVE_RISK'], key=f"adapt_risk_{config_name}"
+                    )
+
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    if st.button("💾 Sauvegarder", type="primary", use_container_width=True, key=f"save_config_{config_name}"):
+                        save_config_by_name(config_name, config)
+                        st.session_state.editing_config_name = None
+                        st.success(f"✅ Configuration '{config_name}' sauvegardée ! Les bots utilisant cette config verront les changements au prochain redémarrage.")
+                        st.rerun()
+
+                with col_cancel:
+                    if st.button("❌ Annuler", type="secondary", use_container_width=True, key=f"cancel_config_{config_name}"):
+                        st.session_state.editing_config_name = None
+                        st.rerun()
+
+            else:
+                # ===== MODE AFFICHAGE =====
+                config = load_config_by_name(config_name)
+
+                # Afficher les paramètres clés
+                col_info1, col_info2, col_info3 = st.columns(3)
+                with col_info1:
+                    st.metric("Risque/Trade", f"{config['RISK_PER_TRADE']*100:.1f}%")
+                    st.metric("Risk/Reward", f"{config['RR_TAKE_PROFIT']:.1f}")
+                with col_info2:
+                    st.metric("Max Trades", config['MAX_CONCURRENT_TRADES'])
+                    st.metric("ML Actif", "✅" if config['USE_ML_META_LABELLING'] else "❌")
+                with col_info3:
+                    st.metric("ATR Filter", "✅" if config['USE_ATR_FILTER'] else "❌")
+                    st.metric("Circuit Breaker", "✅" if config['USE_CIRCUIT_BREAKER'] else "❌")
+
+                # Bots utilisant cette config
+                if bots_using:
+                    st.info(f"🤖 Utilisée par : {', '.join(bots_using)}")
+                else:
+                    st.caption("Aucun bot n'utilise cette configuration")
+
+                # Boutons
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button(f"✏️ Modifier", key=f"edit_config_{config_name}", use_container_width=True):
+                        st.session_state.editing_config_name = config_name
+                        st.rerun()
+
+                with col_btn2:
+                    if config_name != 'Default':
+                        if st.button(f"🗑️ Supprimer", key=f"delete_config_{config_name}", type="secondary", use_container_width=True):
+                            if bots_using:
+                                st.error(f"⚠️ Impossible de supprimer: {len(bots_using)} bot(s) utilisent cette config")
+                            else:
+                                success, msg = delete_config(config_name)
+                                if success:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                    else:
+                        st.caption("La config Default ne peut pas être supprimée")
 
 # ===============================
 # TAB 3: BACKTEST
@@ -574,15 +959,17 @@ with tab3:
     with col_bt1:
         bt_symbol = st.selectbox(
             "Symbole",
-            ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'],
-            index=0
+            ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'],
+            index=0,
+            key="backtest_symbol"
         )
 
     with col_bt2:
         bt_timeframe = st.selectbox(
             "Timeframe",
             ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'],
-            index=1
+            index=1,
+            key="backtest_timeframe"
         )
 
     with col_bt3:
@@ -591,12 +978,13 @@ with tab3:
             min_value=1000,
             max_value=1000000,
             value=100000,
-            step=1000
+            step=1000,
+            key="backtest_bars"
         )
 
     st.info("ℹ️ Le backtest utilisera les parametres configures dans l'onglet 'Parametres'")
 
-    if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True):
+    if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
             success, stdout, stderr = run_backtest_with_params(
                 st.session_state.config,
