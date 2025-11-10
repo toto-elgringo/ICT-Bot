@@ -180,14 +180,17 @@ def pip_value_per_lot(info):
         return (pip_sz / info.trade_tick_size) * info.trade_tick_value
     return 10.0
 
-def load_config_from_file(filepath='bot_config.json'):
-    """Charge la configuration depuis bot_config.json et met a jour les variables globales"""
+def load_config_from_file(config_name='Default'):
+    """Charge la configuration depuis config/{config_name}.json et met a jour les variables globales"""
     global RISK_PER_TRADE, RR_TAKE_PROFIT, MAX_CONCURRENT_TRADES, COOLDOWN_BARS, ML_THRESHOLD
     global USE_SESSION_ADAPTIVE_RR, RR_LONDON, RR_NEWYORK, RR_DEFAULT
     global USE_ML_META_LABELLING, MAX_ML_SAMPLES
     global USE_ATR_FILTER, ATR_FVG_MIN_RATIO, ATR_FVG_MAX_RATIO
     global USE_CIRCUIT_BREAKER, DAILY_DD_LIMIT
     global USE_ADAPTIVE_RISK
+
+    # Construire le chemin vers le fichier de config
+    filepath = f'config/{config_name}.json'
 
     if not os.path.exists(filepath):
         print(f"[CONFIG] Fichier {filepath} introuvable, utilisation des valeurs par defaut")
@@ -1274,9 +1277,6 @@ def run_streamlit(symbol=SYMBOL_DEFAULT, timeframe="M1"):
 # ===============================
 
 def main():
-    # Charger la configuration depuis bot_config.json AVANT tout le reste
-    load_config_from_file('bot_config.json')
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, default="backtest",
                         help="backtest | live | dashboard | streamlit")
@@ -1286,11 +1286,18 @@ def main():
                         help="Nombre de barres")
     parser.add_argument("--no-plot", action="store_true",
                         help="Désactiver l'affichage des graphiques")
+    parser.add_argument("--no-ml", action="store_true",
+                        help="Désactiver le ML meta-labelling (pour grid search rapide)")
     parser.add_argument("--bot-name", type=str, default=None,
                         help="Nom du bot (pour le modèle ML)")
     parser.add_argument("--ml-model-path", type=str, default=None,
                         help="Chemin du fichier modèle ML (doit être dans machineLearning/)")
+    parser.add_argument("--config-name", type=str, default="Default",
+                        help="Nom de la configuration à utiliser (depuis config/)")
     args = parser.parse_args()
+
+    # Charger la configuration depuis config/{config_name}.json AVANT tout le reste
+    load_config_from_file(args.config_name)
 
     symbol = args.symbol
     timeframe = args.timeframe.upper()
@@ -1328,7 +1335,8 @@ def main():
                     return
 
                 # CORRECTION: Le --no-plot ne doit PAS désactiver le ML
-                ml_enabled = USE_ML_META_LABELLING
+                # Mais le --no-ml le désactive pour grid search rapide
+                ml_enabled = USE_ML_META_LABELLING and not args.no_ml
                 ml_filter = MLFilter(
                     model_path=ml_model_path if ml_enabled else None,
                     use_meta_labelling=ml_enabled

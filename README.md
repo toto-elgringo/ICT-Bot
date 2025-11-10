@@ -12,6 +12,7 @@ Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader
   - [2. Configuration Telegram](#2-configuration-telegram)
 - [Démarrage](#-démarrage)
 - [Utilisation](#-utilisation)
+- [Grid Testing](#-grid-testing---optimisation-automatique)
 - [Structure du Projet](#-structure-du-projet)
 - [Troubleshooting](#-troubleshooting)
 - [Sécurité](#-sécurité)
@@ -21,12 +22,16 @@ Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader
 ## ✨ Fonctionnalités
 
 - ✅ **Stratégie ICT** : Fair Value Gaps (FVG), Break of Structure (BOS), Order Blocks (OB), Kill Zones
-- ✅ **Machine Learning** : Meta-labelling avec Logistic Regression pour filtrer les trades
-- ✅ **Dashboard Streamlit** : Interface web pour contrôler et monitorer le bot
+- ✅ **Machine Learning** : Meta-labelling avec Logistic Regression pour filtrer les trades (modèle individuel par bot)
+- ✅ **Gestion Multi-Bot** : Gérez plusieurs bots simultanément avec des configurations différentes
+- ✅ **Dashboard Streamlit** : Interface web complète pour contrôler tous vos bots
+- ✅ **Configurations Nommées** : Créez et gérez plusieurs stratégies (Default, Aggressive, Conservative, etc.)
+- ✅ **Grid Testing** : Optimisation automatique de 1,728 combinaisons de paramètres pour trouver la meilleure config
 - ✅ **Notifications Telegram** : Alertes en temps réel lors de l'ouverture de positions
 - ✅ **Backtesting** : Testez vos stratégies sur des données historiques
 - ✅ **Risk Management** : Circuit breaker, risque adaptatif, sessions adaptatives
 - ✅ **Comparaison de Backtests** : Comparez plusieurs backtests côte à côte
+- ✅ **Organisation des Fichiers** : Logs, modèles ML et configurations isolés par bot
 
 ---
 
@@ -108,6 +113,7 @@ Créez le fichier mt5_credentials.json et rentrez y vos informations sous cette 
 - **Login** : Votre numéro de compte MT5
 - **Password** : Mot de passe de votre compte MT5
 - **Server** : Nom du serveur de votre broker (ex: `ICMarkets-Demo`, `FusionMarkets-Demo`)
+- **Fonction** : Il permet de pouvoir charger les graphiques et faire les backtest
 
 ---
 
@@ -159,23 +165,26 @@ Vous devriez recevoir un message de test sur Telegram ! 🎉
 
 ## 🚀 Démarrage
 
-### Mode 1 : Interface Dashboard (Recommandé)
+### Mode 1 : Interface Multi-Bot (Recommandé)
 
 Lancez l'interface web Streamlit :
 
 ```bash
-streamlit run streamlit_bot_manager_v2.py
+streamlit run streamlit_bot_manager.py
 ```
 
 L'interface s'ouvrira automatiquement dans votre navigateur à l'adresse : `http://localhost:8501`
 
 **Depuis le dashboard, vous pouvez** :
-- ✅ Démarrer/Arrêter le bot en mode LIVE
-- ✅ Modifier les paramètres de trading
-- ✅ Lancer des backtests
-- ✅ Comparer les résultats de backtests
-- ✅ Supprimer des backtests
-- ✅ Visualiser les courbes d'équité
+- ✅ **Gérer plusieurs bots** : Créer, modifier, supprimer des bots
+- ✅ **Chaque bot a** : Son propre compte MT5, symbole, configuration et modèle ML
+- ✅ **Démarrer/Arrêter** : Contrôlez chaque bot individuellement
+- ✅ **Créer des configurations** : Nommez vos stratégies (Aggressive, Scalping, etc.)
+- ✅ **Lancer des backtests** : Testez vos configurations
+- ✅ **Grid Testing** : Optimisez automatiquement vos paramètres (1,728 combinaisons)
+- ✅ **Comparer les résultats** : Analysez plusieurs backtests côte à côte
+- ✅ **Visualiser les performances** : Courbes d'équité, métriques détaillées
+- ✅ **Consulter les logs** : Logs individuels par bot dans le dossier log/
 
 ---
 
@@ -211,39 +220,76 @@ python ict_bot_all_in_one.py --mode live --symbol EURUSD --timeframe M5
 
 ## 📖 Utilisation
 
-### Dashboard Streamlit
+### Dashboard Streamlit Multi-Bot
 
-#### 📊 Onglet "Dashboard Live"
-- Visualisez votre solde, équité, profit
-- Consultez les positions ouvertes
-- Voyez les derniers trades (24h)
+#### 🤖 Onglet "Gestion des Bots"
 
-#### ⚙️ Onglet "Paramètres"
-Configurez tous les paramètres :
-- **Risque par trade** : 0.1% - 5%
-- **Risk/Reward** : 1.0 - 3.0
-- **Max trades concurrents** : 1-5
-- **Cooldown** : Barres entre trades
-- **ML Threshold** : Seuil de confiance (0.0 - 1.0)
-- **Filtres ATR, Circuit Breaker, Risque Adaptatif**
+**Ajouter un nouveau bot** :
+1. Remplissez les informations :
+   - **Nom** : Ex. "Bot EURUSD Agressif"
+   - **Login MT5** : Numéro de compte
+   - **Password & Server** : Identifiants MT5
+   - **Symbole** : EURUSD, GBPUSD, XAUUSD, BTCUSD, etc.
+   - **Timeframe** : M1, M5, M15, etc.
+   - **Configuration** : Sélectionnez une stratégie (Default, Aggressive, etc.)
+2. Cliquez sur "✅ Ajouter le Bot"
+3. Le système crée automatiquement :
+   - Un modèle ML dans `machineLearning/Bot_EURUSD.pkl`
+   - Un fichier de log dans `log/bot_{id}_live.log`
+
+**Gérer vos bots** :
+- ▶️ **Démarrer** : Lance le bot avec sa configuration
+- ⏸️ **Arrêter** : Stoppe le bot
+- ✏️ **Modifier** : Changez symbole, configuration, credentials
+- 🗑️ **Supprimer** : Supprime le bot (+ modèle ML + log)
+- 📊 **Infos MT5** : Consultez balance, equity, marge
+- 📍 **Positions** : Voir les positions ouvertes
+- 📋 **Logs** : Logs en temps réel du bot
+
+#### ⚙️ Onglet "Gestionnaire de Configurations"
+
+**Créer une configuration** :
+1. Nommez votre stratégie (ex: "Aggressive", "Scalping")
+2. Elle sera créée avec les paramètres par défaut
+3. Modifiez-la selon vos besoins
+
+**Paramètres configurables** :
+- **Risque & MM** : Risque par trade, RR, Max trades, Cooldown
+- **ML & RR Adaptatif** : ML threshold, samples, RR par session
+- **Filtres** : ATR, Circuit Breaker, Risque Adaptatif
+
+**Important** :
+- Plusieurs bots peuvent utiliser la même configuration
+- Les modifications s'appliquent à tous les bots au prochain redémarrage
+- Vous ne pouvez pas supprimer une config utilisée par un bot
 
 #### 🧪 Onglet "Backtest"
-- Sélectionnez symbole, timeframe, nombre de barres
-- Lancez un backtest avec les paramètres actuels
-- Visualisez les résultats
+- Sélectionnez symbole, timeframe, nombre de barres et configuration
+- Lancez un backtest pour tester une stratégie
+- Résultats sauvegardés dans `backtest/`
+- Visualisez les métriques détaillées
 
 #### 📈 Onglet "Historique"
-- **Consultez** les backtests passés
+- **Consultez** un backtest : Métriques + courbe d'équité
 - **Supprimez** les backtests inutiles (bouton 🗑️)
 - **Comparez** plusieurs backtests côte à côte
-  - Multiselect dropdown
-  - Tableau : Trades | Win Rate (%) | PnL ($) | Max DD (%)
+  - Sélection multiple
+  - Tableau comparatif : Trades | Win Rate (%) | PnL ($) | Max DD (%)
+
+#### 🔬 Onglet "Grid Testing"
+- **Optimisation automatique** de 1,728 combinaisons de paramètres
+- Teste 7 paramètres : Risk, RR, Max Trades, Cooldown, ML Threshold, ATR Filter, Circuit Breaker
+- Multiprocessing pour accélérer les tests (1-4 workers)
+- Score composite : 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)
+- Sauvegarde automatique du top 5 dans `Grid/`
+- Création de nouvelles configurations à partir des meilleurs résultats
+- **Voir section dédiée** ci-dessous pour le guide complet
 
 ---
 
 ### Notifications Telegram
 
-Quand le bot ouvre une position, vous recevez :
+Quand un bot ouvre une position, vous recevez :
 
 ```
 🔔 Nouvelle Position Ouverte
@@ -255,9 +301,238 @@ Quand le bot ouvre une position, vous recevez :
 🛑 Stop Loss: 1.08350
 
 📊 Risque: 0.00100
-⏰ Heure: 2025-11-02 14:23:15
+⏰ Heure: 2025-11-09 14:23:15
 💰 Volume: 0.15 lots
 ```
+
+---
+
+## 🔬 Grid Testing - Optimisation Automatique
+
+### 🎯 Qu'est-ce que le Grid Testing?
+
+Le Grid Testing teste **automatiquement 1,728 combinaisons** de paramètres pour trouver la configuration optimale de votre bot ICT.
+
+### ⚠️ IMPORTANT: Kill Zones et Nombre de Barres
+
+Le bot ICT **trade UNIQUEMENT pendant les Kill Zones**:
+- London Kill Zone: 02h-05h ET (Eastern Time)
+- New York Kill Zone: 07h-10h ET
+
+Cela représente **seulement 6 heures sur 24** (25% du temps).
+
+**Pourquoi c'est important?**
+- **M5 avec 500 barres** = 1.7 jours = **0 trades** (pas assez de kill zones)
+- **M5 avec 100,000 barres** = 347 jours = **Crash/timeout**
+- **Solution**: Utilisez H1 ou H4 avec 2,000-5,000 barres
+
+### ✅ Nombre de Barres Recommandé par Timeframe
+
+| Timeframe | Minimum | Optimal | Maximum | Période |
+|-----------|---------|---------|---------|---------|
+| **M5** | 10,000 | 15,000-20,000 | 30,000 | 35-70 jours |
+| **H1** ⭐ | 2,000 | 3,000-5,000 | 10,000 | 83-208 jours |
+| **H4** ⭐ | 1,000 | 1,500-2,000 | 3,000 | 166-333 jours |
+
+**Recommandation**: H1 ou H4 sont les meilleurs compromis vitesse/données.
+
+### 🚀 Configuration Optimale Recommandée
+
+#### Option 1: Test Rapide (2 heures)
+```
+Symbole: EURUSD
+Timeframe: H1
+Barres: 3,000 (≈4 mois)
+Workers: 1 (mode séquentiel - le plus stable)
+```
+
+#### Option 2: Équilibré (3 heures) - RECOMMANDÉ
+```
+Symbole: EURUSD
+Timeframe: H1
+Barres: 5,000 (≈7 mois)
+Workers: 2
+```
+
+#### Option 3: Maximum de Données (4 heures)
+```
+Symbole: EURUSD
+Timeframe: H4
+Barres: 2,000 (≈11 mois)
+Workers: 1
+```
+
+### ⚙️ Paramètres Testés (1,728 combinaisons)
+
+| Paramètre | Valeurs testées | Description |
+|-----------|----------------|-------------|
+| RISK_PER_TRADE | 0.005, 0.01, 0.02 | Risque par trade (0.5%, 1%, 2%) |
+| RR_TAKE_PROFIT | 1.5, 1.8, 2.0, 2.5 | Ratio Risk/Reward |
+| MAX_CONCURRENT_TRADES | 1, 2, 3 | Nombre de trades simultanés |
+| COOLDOWN_BARS | 3, 5, 8 | Barres d'attente entre trades |
+| ML_THRESHOLD | 0.3, 0.4, 0.5, 0.6 | Seuil de confiance ML |
+| USE_ATR_FILTER | True, False | Filtre basé sur la volatilité |
+| USE_CIRCUIT_BREAKER | True, False | Stop en cas de drawdown élevé |
+
+**Total**: 3 × 4 × 3 × 3 × 4 × 2 × 2 = **1,728 tests**
+
+### 📊 Score Composite
+
+Chaque configuration reçoit un score basé sur:
+
+```
+Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1 - Drawdown)
+```
+
+Les **top 5** configurations sont sauvegardées dans `Grid/`.
+
+### 💻 Workers et Performance
+
+| Workers | Temps | Stabilité | RAM | Recommandation |
+|---------|-------|-----------|-----|----------------|
+| **1** | 3-4h | ⭐⭐⭐⭐⭐ | 4GB | ✅ Le plus stable |
+| **2** | 2-3h | ⭐⭐⭐⭐ | 8GB | ✅ Bon compromis |
+| **3** | 1.5-2h | ⭐⭐⭐ | 12GB | ⚠️ Risqué |
+| **4** | 1-1.5h | ⭐⭐ | 16GB+ | ⚠️ Très risqué |
+
+**Important**: Fermez toutes les applications gourmandes (Chrome, PyCharm, etc.) avant de lancer.
+
+### 🔍 Vérifier que ça Fonctionne
+
+Après le lancement, consultez `Grid/debug_first_test.txt`:
+
+**✅ Bon signe** (backtest avec des trades):
+```
+=== METRICS (EURUSD H1) ===
+Trades: 45 | Winrate: 62.5% | PnL: 1234.56 | MaxDD: -8.75% | Equity finale: 11234.56
+```
+
+**❌ Mauvais signe** (pas assez de barres):
+```
+=== METRICS (EURUSD M5) ===
+Trades: 0 | Winrate: 0.0% | PnL: 0.00 | MaxDD: 0.00% | Equity finale: 10000.00
+
+=== STATISTIQUES DE FILTRAGE ===
+|- Kill zones: 342    <-- 76% des barres filtrées
+'- Entrees validees: 0    <-- Aucun trade généré
+```
+
+**Solution**: Augmentez le nombre de barres ou utilisez H1/H4.
+
+### 📁 Fichiers Générés
+
+```
+Grid/
+├── grid_results_EURUSD_H1_20251110_143012.json   # Top 5 configurations
+├── grid_results_EURUSD_H4_20251110_152045.json   # Autre test
+└── debug_first_test.txt                          # Debug du premier test
+```
+
+### 🎯 Utiliser les Résultats
+
+1. **Ouvrez l'onglet Grid Testing** dans Streamlit
+2. **Sélectionnez un rapport** dans l'historique
+3. **Examinez le top 5** configurations
+4. **Cliquez sur "💾 Sauvegarder"** pour créer une nouvelle configuration
+5. **Testez manuellement** dans l'onglet Backtest
+6. **Lancez un bot** avec cette config si les résultats sont bons
+
+### ❓ FAQ Grid Testing
+
+**Q: Pourquoi j'ai 0 trades avec M5?**
+R: Pas assez de barres. M5 nécessite 10,000-20,000 barres minimum.
+
+**Q: Mon PC crash, que faire?**
+R: Utilisez 1 worker uniquement, fermez les autres apps, réduisez le nombre de barres.
+
+**Q: Quel timeframe choisir?**
+R: H1 ou H4 sont recommandés. Plus rapide et moins gourmand que M5.
+
+**Q: Combien de temps ça prend?**
+R: 2-4 heures avec 1 worker selon le nombre de barres.
+
+**Q: Puis-je arrêter et reprendre?**
+R: Non, le grid search doit tourner en continu. Mais vous pouvez utiliser votre PC normalement pendant (évitez juste les tâches lourdes).
+
+**Q: Les résultats sont-ils fiables?**
+R: Plus vous utilisez de barres (données historiques), plus les résultats sont fiables. Minimum recommandé: 3-6 mois de données.
+
+### 🚨 Troubleshooting Grid Testing
+
+**Erreur: "Timeout"**
+- Réduisez le nombre de barres
+- Le timeout s'ajuste automatiquement mais a une limite de 5 minutes par test
+
+**Erreur: "Memory Error"**
+- Réduisez à 1 worker
+- Fermez Chrome, PyCharm, etc.
+- Réduisez le nombre de barres
+
+**Tous les scores à 0**
+- Vérifiez `Grid/debug_first_test.txt`
+- Augmentez le nombre de barres (minimum 2,000 en H1, 1,000 en H4)
+- Essayez H1 ou H4 au lieu de M5
+
+**PC freeze/crash**
+- TROP de workers
+- TROP de barres
+- Pas assez de RAM
+- **Solution**: 1 worker + 3,000-5,000 barres en H1
+
+---
+
+## 🏗️ Architecture Multi-Bot
+
+### Comment ça fonctionne ?
+
+1. **Création d'un bot** :
+   - Vous donnez un nom, symbole, timeframe, et credentials MT5
+   - Vous choisissez une configuration (Default, Aggressive, etc.)
+   - Le système génère un ID unique (ex: `a1b2c3d4`)
+   - Crée automatiquement :
+     - `machineLearning/Bot_{nom}.pkl` (modèle ML)
+     - `log/bot_{id}_live.log` (fichier de log)
+
+2. **Lancement d'un bot** :
+   - La configuration sélectionnée est chargée depuis `config/{config_name}.json`
+   - Les credentials MT5 du bot sont utilisés
+   - Le bot charge/entraîne son modèle ML personnel
+   - Les logs sont écrits dans son fichier dédié
+
+3. **Plusieurs bots peuvent** :
+   - Utiliser la même configuration (ex: 3 bots avec "Aggressive")
+   - Trader sur le même compte MT5 ou des comptes différents
+   - Trader le même symbole avec des timeframes différents
+   - Fonctionner simultanément sans conflit
+
+4. **Suppression d'un bot** :
+   - Supprime l'entrée dans `bots_config.json`
+   - Supprime le modèle ML `machineLearning/Bot_{nom}.pkl`
+   - Supprime le fichier de log `log/bot_{id}_live.log`
+   - Conserve la configuration (peut être utilisée par d'autres bots)
+
+### Exemple d'utilisation
+
+**Scénario : 3 bots avec 2 configurations**
+
+```
+Bot 1: "EURUSD Agressif"
+- Symbole: EURUSD, TF: M5
+- Config: Aggressive
+- Compte: Demo Account 1
+
+Bot 2: "GBPUSD Agressif"
+- Symbole: GBPUSD, TF: M5
+- Config: Aggressive (même config que Bot 1)
+- Compte: Demo Account 1
+
+Bot 3: "XAUUSD Conservateur"
+- Symbole: XAUUSD, TF: H1
+- Config: Conservative
+- Compte: Demo Account 2
+```
+
+→ Si vous modifiez "Aggressive", cela impacte Bot 1 et Bot 2 au redémarrage
 
 ---
 
@@ -266,22 +541,59 @@ Quand le bot ouvre une position, vous recevez :
 ```
 ICT-Bot/
 ├── ict_bot_all_in_one.py              # Bot principal (backtest + live)
-├── streamlit_bot_manager_v2.py        # Interface web dashboard
+├── streamlit_bot_manager_v2.py        # Interface web multi-bot
+├── grid_search_engine.py              # Moteur d'optimisation Grid Testing
 ├── test_telegram.py                   # Test des notifications Telegram
+├── test_grid_parsing.py               # Test du parsing Grid Testing
 │
-├── mt5_credentials.json               # Vos credentials MT5 (non versionné)
-├── telegram_credentials.json          # Vos credentials Telegram (non versionné)
-├── bot_config.json                    # Configuration des paramètres
+├── mt5_credentials.json               # Credentials MT5 (non versionné)
+├── telegram_credentials.json          # Credentials Telegram (non versionné)
+├── bots_config.json                   # Liste des bots configurés (non versionné)
 │
+├── config/                            # Configurations nommées (non versionné)
+│   ├── Default.json                   # Configuration par défaut (auto-créée)
+│   ├── Aggressive.json                # Exemple de config personnalisée
+│   └── Conservative.json              # Autre config personnalisée
 │
-├── backtest/                          # Résultats des backtests (JSON)
-│   ├── backtest_20250102_1430.json
-│   └── backtest_20250102_1520.json
+├── machineLearning/                   # Modèles ML par bot (non versionné)
+│   ├── Bot_EURUSD.pkl                 # Modèle ML du bot EURUSD
+│   ├── Bot_GBPUSD.pkl                 # Modèle ML du bot GBPUSD
+│   └── Bot_XAUUSD.pkl                 # Modèle ML du bot XAUUSD
 │
-├── ict_model.pkl                      # Modèle ML sauvegardé
+├── log/                               # Logs individuels par bot (non versionné)
+│   ├── bot_a1b2c3d4_live.log         # Log du bot ID a1b2c3d4
+│   └── bot_e5f6g7h8_live.log         # Log du bot ID e5f6g7h8
+│
+├── backtest/                          # Résultats des backtests (non versionné)
+│   ├── backtest_EURUSD_M5_20251109_143012.json
+│   └── backtest_XAUUSD_H1_20251109_152045.json
+│
+├── Grid/                              # Résultats Grid Testing (non versionné)
+│   ├── grid_results_EURUSD_H1_20251110_143012.json
+│   ├── grid_results_EURUSD_H4_20251110_152045.json
+│   └── debug_first_test.txt           # Debug du premier test
+│
 ├── .gitignore                         # Protège les fichiers sensibles
 └── README.md                          # Ce fichier
 ```
+
+### 📋 Organisation des fichiers
+
+**Fichiers de configuration** :
+- Chaque bot référence une configuration nommée dans `config/`
+- Les configurations sont partagées entre bots
+- Modification d'une config = impact tous les bots l'utilisant
+
+**Modèles ML** :
+- Chaque bot a son propre modèle dans `machineLearning/`
+- Nommés `{Nom_du_bot}.pkl`
+- Créés automatiquement au lancement
+- Supprimés avec le bot
+
+**Logs** :
+- Chaque bot a son fichier de log dans `log/`
+- Nommés `bot_{id}_live.log`
+- Supprimés avec le bot
 
 ---
 
@@ -332,7 +644,7 @@ ICT-Bot/
 **Erreur : "Port 8501 already in use"**
 ```bash
 # Utilisez un autre port
-streamlit run streamlit_bot_manager_v2.py --server.port 8502
+streamlit run streamlit_bot_manager.py --server.port 8502
 ```
 
 **Erreur : "streamlit: command not found"**
@@ -423,7 +735,7 @@ python ict_bot_all_in_one.py --mode live --symbol EURUSD --timeframe M5
 
 ### Phase 3 : Monitoring via Dashboard
 ```bash
-streamlit run streamlit_bot_manager_v2.py
+streamlit run streamlit_bot_manager.py
 # Surveillez les performances quotidiennement
 ```
 
@@ -432,9 +744,11 @@ streamlit run streamlit_bot_manager_v2.py
 
 ---
 
+## Commnent Fonctionne le Bot
+
 Composants par ordre d'importance pour la performance :
 
-  1. Stratégie ICT de base (★★★★★) - LA PLUS IMPORTANTE
+### 1. Stratégie ICT de base (★★★★★) - LA PLUS IMPORTANTE
 
   - Fair Value Gaps (FVG) : Détecte les inefficiences de prix
   - Break of Structure (BOS) : Identifie les changements de tendance
@@ -443,7 +757,7 @@ Composants par ordre d'importance pour la performance :
 
   Preuve : Votre baseline (301 trades, 53.49% WR, +20,678$ PnL) vient principalement de cette stratégie.
 
-  2. Kill Zones - Sessions de trading (★★★★☆)
+### 2. Kill Zones - Sessions de trading (★★★★☆)
 
   KZ_LONDON = (8, 11)    # 8h-11h Paris
   KZ_NEWYORK = (14, 17)  # 14h-17h Paris
@@ -451,7 +765,7 @@ Composants par ordre d'importance pour la performance :
   - Réduit drastiquement les faux signaux
   - Capture les mouvements institutionnels
 
-  3. Risk Management (★★★★☆)
+### 3. Risk Management (★★★★☆)
 
   - RR_TAKE_PROFIT = 1.8 : Ratio risque/récompense 1:1.8
   - DAILY_DD_LIMIT = 0.03 : Circuit breaker à -3%
@@ -460,13 +774,13 @@ Composants par ordre d'importance pour la performance :
 
   Impact : Protège le capital et maximise les gains
 
-  4. Filtre ATR (★★★☆☆)
+### 4. Filtre ATR (★★★☆☆)
 
   ATR_FVG_MIN_RATIO = 0.2
   ATR_FVG_MAX_RATIO = 2.5
   Impact : Filtre les FVG trop petits ou trop grands par rapport à la volatilité
 
-  5. ML Meta-Labelling (★★☆☆☆) - FILTRE SECONDAIRE
+### 5. ML Meta-Labelling (★★☆☆☆) - FILTRE SECONDAIRE
 
   ML_THRESHOLD = 0.4
   Impact : Avec un seuil de 0.4 (40%), le ML rejette environ 60% des signaux
@@ -479,19 +793,13 @@ Composants par ordre d'importance pour la performance :
   - Grid search de 432 combinaisons → Aucune amélioration vs baseline
   - Cela montre que la stratégie ICT est déjà très sélective
 
-  Conclusion :
+### Conclusion :
 
   Hiérarchie de performance :
   1. ICT Strategy (FVG + BOS + OB) : 70% de la performance
   2. Kill Zones (London/NY) : 20% de la performance
   3. Risk Management : 8% de la performance
   4. ML + Filtres : 2% de la performance (fine-tuning)
-
-  Le ML est utile mais pas critique. Si vous le désactiviez complètement, le bot fonctionnerait toujours bien grâce à la
-  stratégie ICT. Le ML ajoute une couche de prudence supplémentaire.
-
-  Recommandation : Concentrez-vous sur l'optimisation des Kill Zones et du Risk Management plutôt que sur le ML. Le modèle ICT
-  fait déjà le gros du travail !
 
 ---
 
@@ -509,20 +817,20 @@ Ce projet est fourni "tel quel" sans garantie. Utilisez-le à vos propres risque
 
 ---
 
-## 🎯 Prochaines Étapes
+## 🎯 Résumé des Étapes
 
 1. ✅ Installer les dépendances
 2. ✅ Configurer MT5 et Telegram
 3. ✅ Tester avec `test_telegram.py`
 4. ✅ Lancer un backtest
-5. ✅ Tester sur compte DEMO
+5. ✅ Tester sur compte **DEMO**
 6. ✅ Monitorer via Dashboard
 7. ⏳ Passage en LIVE après validation
 
 ---
 
-**Version** : 2.0
-**Dernière mise à jour** : Novembre 2025
-**Bot** : ICT Trading Bot with ML Meta-Labelling
+**Version** : 3.1 - Multi-Bot Edition avec Grid Testing
+**Dernière mise à jour** : 10 Novembre 2025
+**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & Grid Testing Optimization
 
 🤖 **Happy Trading!**

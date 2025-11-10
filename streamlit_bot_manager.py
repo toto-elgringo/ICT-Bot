@@ -26,14 +26,12 @@ except:
     MT5_AVAILABLE = False
     st.error("MetaTrader5 n'est pas installe. Installez-le avec: pip install MetaTrader5")
 
-# ===============================
-# FONCTIONS UTILITAIRES
-# ===============================
-
-def save_config_to_file(config):
-    """Sauvegarde la configuration dans un fichier JSON (legacy - pour compatibilité)"""
-    with open('bot_config.json', 'w') as f:
-        json.dump(config, f, indent=4)
+# Import Grid Search Engine
+try:
+    from grid_search_engine import run_grid_search, save_top_results, generate_all_combinations
+    GRID_SEARCH_AVAILABLE = True
+except ImportError:
+    GRID_SEARCH_AVAILABLE = False
 
 # ===============================
 # GESTION DES CONFIGURATIONS
@@ -331,11 +329,10 @@ def get_open_positions_bot(login, password, server):
     mt5.shutdown()
     return pos_list
 
-def run_backtest_with_params(config, symbol, timeframe, bars):
-    """Lance un backtest avec les parametres donnes"""
-    # Lancer le backtest avec le nombre de barres specifie
-    # Note: Le bot utilise les parametres de bot_config.json
-    cmd = f'python ict_bot_all_in_one.py --mode backtest --symbol {symbol} --timeframe {timeframe} --bars {bars}'
+def run_backtest_with_params(config_name, symbol, timeframe, bars):
+    """Lance un backtest avec la configuration specifiee"""
+    # Lancer le backtest avec le nombre de barres specifie et la config
+    cmd = f'python ict_bot_all_in_one.py --mode backtest --symbol {symbol} --timeframe {timeframe} --bars {bars} --config-name {config_name}'
 
     # Timeout adaptatif selon le nombre de barres
     # ~30 secondes par 100k barres + 5 minutes de marge
@@ -433,7 +430,7 @@ with st.sidebar:
 # ===============================
 # ONGLETS PRINCIPAUX
 # ===============================
-tab1, tab2, tab3, tab4 = st.tabs(["🤖 Gestion des Bots", "⚙️ Parametres", "🧪 Backtest", "📈 Historique"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 Gestion des Bots", "⚙️ Parametres", "🧪 Backtest", "📈 Historique", "🔬 Grid Testing"])
 
 # ===============================
 # TAB 1: GESTION DES BOTS
@@ -639,10 +636,8 @@ with tab1:
                                 st.rerun()
                         else:
                             if st.button(f"▶️ Démarrer", key=f"start_{bot_id}", type="primary", use_container_width=True):
-                                # Charger et sauvegarder la config spécifique du bot
+                                # Récupérer le nom de la configuration du bot
                                 config_name = bot.get('config_name', 'Default')
-                                bot_config = load_config_by_name(config_name)
-                                save_config_to_file(bot_config)  # Sauvegarder dans bot_config.json pour le bot
 
                                 # Créer un fichier de credentials temporaire pour ce bot
                                 temp_creds = {
@@ -666,7 +661,8 @@ with tab1:
                                      "--symbol", bot['symbol'],
                                      "--timeframe", bot['timeframe'],
                                      "--bot-name", bot['name'],
-                                     "--ml-model-path", ml_model_path],
+                                     "--ml-model-path", ml_model_path,
+                                     "--config-name", config_name],
                                     stdout=log_file,
                                     stderr=subprocess.STDOUT,
                                     text=True,
@@ -826,33 +822,33 @@ with tab2:
                 with col1:
                     st.subheader("🎯 Risque & MM")
                     config['RISK_PER_TRADE'] = st.slider(
-                        "Risque par trade (%)", 0.001, 0.05, config['RISK_PER_TRADE'], 0.001, format="%.3f", key=f"risk_{config_name}"
+                        "Risque par trade (%)", 0.001, 0.05, config.get('RISK_PER_TRADE', 0.01), 0.001, format="%.3f", key=f"risk_{config_name}"
                     )
                     config['RR_TAKE_PROFIT'] = st.slider(
-                        "Risk/Reward", 1.0, 3.0, config['RR_TAKE_PROFIT'], 0.1, key=f"rr_{config_name}"
+                        "Risk/Reward", 1.0, 3.0, config.get('RR_TAKE_PROFIT', 2.0), 0.1, key=f"rr_{config_name}"
                     )
                     config['MAX_CONCURRENT_TRADES'] = st.slider(
-                        "Max trades", 1, 5, config['MAX_CONCURRENT_TRADES'], key=f"max_trades_{config_name}"
+                        "Max trades", 1, 5, config.get('MAX_CONCURRENT_TRADES', 1), key=f"max_trades_{config_name}"
                     )
                     config['COOLDOWN_BARS'] = st.slider(
-                        "Cooldown", 1, 20, config['COOLDOWN_BARS'], key=f"cooldown_{config_name}"
+                        "Cooldown", 1, 20, config.get('COOLDOWN_BARS', 5), key=f"cooldown_{config_name}"
                     )
 
                 with col2:
                     st.subheader("🧠 ML & RR Adaptatif")
                     config['USE_ML_META_LABELLING'] = st.checkbox(
-                        "ML Meta-Labelling", config['USE_ML_META_LABELLING'], key=f"ml_use_{config_name}"
+                        "ML Meta-Labelling", config.get('USE_ML_META_LABELLING', False), key=f"ml_use_{config_name}"
                     )
                     if config['USE_ML_META_LABELLING']:
                         config['ML_THRESHOLD'] = st.slider(
-                            "Seuil ML", 0.0, 1.0, config['ML_THRESHOLD'], 0.05, key=f"ml_thresh_{config_name}"
+                            "Seuil ML", 0.0, 1.0, config.get('ML_THRESHOLD', 0.5), 0.05, key=f"ml_thresh_{config_name}"
                         )
                         config['MAX_ML_SAMPLES'] = st.slider(
-                            "Max samples ML", 100, 1000, config['MAX_ML_SAMPLES'], 50, key=f"ml_samples_{config_name}"
+                            "Max samples ML", 100, 1000, config.get('MAX_ML_SAMPLES', 500), 50, key=f"ml_samples_{config_name}"
                         )
 
                     config['USE_SESSION_ADAPTIVE_RR'] = st.checkbox(
-                        "RR adaptatif", config['USE_SESSION_ADAPTIVE_RR'], key=f"rr_adapt_{config_name}"
+                        "RR adaptatif", config.get('USE_SESSION_ADAPTIVE_RR', False), key=f"rr_adapt_{config_name}"
                     )
                     if config['USE_SESSION_ADAPTIVE_RR']:
                         config['RR_LONDON'] = st.slider(
@@ -868,26 +864,26 @@ with tab2:
                 with col3:
                     st.subheader("🔧 Filtres")
                     config['USE_ATR_FILTER'] = st.checkbox(
-                        "Filtre ATR", config['USE_ATR_FILTER'], key=f"atr_use_{config_name}"
+                        "Filtre ATR", config.get('USE_ATR_FILTER', False), key=f"atr_use_{config_name}"
                     )
                     if config['USE_ATR_FILTER']:
                         config['ATR_FVG_MIN_RATIO'] = st.slider(
-                            "ATR Min", 0.1, 1.0, config['ATR_FVG_MIN_RATIO'], 0.05, key=f"atr_min_{config_name}"
+                            "ATR Min", 0.1, 1.0, config.get('ATR_FVG_MIN_RATIO', 0.3), 0.05, key=f"atr_min_{config_name}"
                         )
                         config['ATR_FVG_MAX_RATIO'] = st.slider(
-                            "ATR Max", 1.0, 5.0, config['ATR_FVG_MAX_RATIO'], 0.1, key=f"atr_max_{config_name}"
+                            "ATR Max", 1.0, 5.0, config.get('ATR_FVG_MAX_RATIO', 2.0), 0.1, key=f"atr_max_{config_name}"
                         )
 
                     config['USE_CIRCUIT_BREAKER'] = st.checkbox(
-                        "Circuit Breaker", config['USE_CIRCUIT_BREAKER'], key=f"cb_use_{config_name}"
+                        "Circuit Breaker", config.get('USE_CIRCUIT_BREAKER', False), key=f"cb_use_{config_name}"
                     )
                     if config['USE_CIRCUIT_BREAKER']:
                         config['DAILY_DD_LIMIT'] = st.slider(
-                            "DD journalier", 0.01, 0.10, config['DAILY_DD_LIMIT'], 0.01, format="%.2f", key=f"dd_limit_{config_name}"
+                            "DD journalier", 0.01, 0.10, config.get('DAILY_DD_LIMIT', 0.05), 0.01, format="%.2f", key=f"dd_limit_{config_name}"
                         )
 
                     config['USE_ADAPTIVE_RISK'] = st.checkbox(
-                        "Risque Adaptatif", config['USE_ADAPTIVE_RISK'], key=f"adapt_risk_{config_name}"
+                        "Risque Adaptatif", config.get('USE_ADAPTIVE_RISK', False), key=f"adapt_risk_{config_name}"
                     )
 
                 col_save, col_cancel = st.columns(2)
@@ -910,14 +906,14 @@ with tab2:
                 # Afficher les paramètres clés
                 col_info1, col_info2, col_info3 = st.columns(3)
                 with col_info1:
-                    st.metric("Risque/Trade", f"{config['RISK_PER_TRADE']*100:.1f}%")
-                    st.metric("Risk/Reward", f"{config['RR_TAKE_PROFIT']:.1f}")
+                    st.metric("Risque/Trade", f"{config.get('RISK_PER_TRADE', 0.01)*100:.1f}%")
+                    st.metric("Risk/Reward", f"{config.get('RR_TAKE_PROFIT', 2.0):.1f}")
                 with col_info2:
-                    st.metric("Max Trades", config['MAX_CONCURRENT_TRADES'])
-                    st.metric("ML Actif", "✅" if config['USE_ML_META_LABELLING'] else "❌")
+                    st.metric("Max Trades", config.get('MAX_CONCURRENT_TRADES', 1))
+                    st.metric("ML Actif", "✅" if config.get('USE_ML_META_LABELLING', False) else "❌")
                 with col_info3:
-                    st.metric("ATR Filter", "✅" if config['USE_ATR_FILTER'] else "❌")
-                    st.metric("Circuit Breaker", "✅" if config['USE_CIRCUIT_BREAKER'] else "❌")
+                    st.metric("ATR Filter", "✅" if config.get('USE_ATR_FILTER', False) else "❌")
+                    st.metric("Circuit Breaker", "✅" if config.get('USE_CIRCUIT_BREAKER', False) else "❌")
 
                 # Bots utilisant cette config
                 if bots_using:
@@ -951,9 +947,9 @@ with tab2:
 # TAB 3: BACKTEST
 # ===============================
 with tab3:
-    st.header("🧪 Backtester avec Parametres Actuels")
+    st.header("🧪 Backtest avec Configuration")
 
-    col_bt1, col_bt2, col_bt3 = st.columns(3)
+    col_bt1, col_bt2, col_bt3, col_bt4 = st.columns(4)
 
     with col_bt1:
         bt_symbol = st.selectbox(
@@ -981,19 +977,30 @@ with tab3:
             key="backtest_bars"
         )
 
-    st.info("ℹ️ Le backtest utilisera les parametres configures dans l'onglet 'Parametres'")
+    with col_bt4:
+        # Charger la liste des configurations disponibles
+        available_configs_bt = load_configs_list()
+        bt_config_name = st.selectbox(
+            "⚙️ Configuration",
+            available_configs_bt,
+            index=0 if 'Default' in available_configs_bt else 0,
+            key="backtest_config",
+            help="Sélectionnez la configuration à tester"
+        )
+
+    st.info(f"ℹ️ Le backtest utilisera la configuration '{bt_config_name}' depuis le dossier config/")
 
     if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
             success, stdout, stderr = run_backtest_with_params(
-                st.session_state.config,
+                bt_config_name,
                 bt_symbol,
                 bt_timeframe,
                 bt_bars
             )
 
             if success:
-                st.success("✅ Backtest termine avec succes !")
+                st.success(f"✅ Backtest termine avec succes (config: {bt_config_name}) !")
                 st.text_area("Output", stdout, height=300)
             else:
                 st.error("❌ Erreur lors du backtest")
@@ -1179,6 +1186,316 @@ with tab4:
             st.info("👆 Sélectionnez au moins un backtest pour commencer la comparaison")
     else:
         st.warning("Aucun backtest disponible")
+
+# ===============================
+# TAB 5: GRID TESTING
+# ===============================
+with tab5:
+    st.header("🔬 Grid Testing - Optimisation des Parametres")
+
+    if not GRID_SEARCH_AVAILABLE:
+        st.error("⚠️ Le module grid_search_engine n'est pas disponible")
+    else:
+        st.warning(
+            "La majorité des barres sont donc filtrées!\n\n"
+            "**Minimum recommandé** (pour avoir des trades):\n"
+            "- **M5**: 10,000-20,000 barres (≈35-70 jours)\n"
+            "- **H1**: 2,000-5,000 barres (≈83-208 jours)\n"
+            "- **H4**: 1,000-2,000 barres (≈166-333 jours)\n\n"
+            "**Optimisation**:\n"
+            "- Utilisez ** 80% workers** max (évite crashs)\n"
+            "- Fermez les apps non essentielles\n"
+        )
+
+        st.info(
+            "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
+            "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)"
+        )
+
+        # Section: Configuration du test
+        st.subheader("⚙️ Configuration du Test")
+
+        col_grid1, col_grid2, col_grid3 = st.columns(3)
+
+        with col_grid1:
+            grid_symbol = st.selectbox(
+                "Symbole",
+                ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'NAS100', 'US30', 'US500'],
+                index=0,
+                key="grid_symbol"
+            )
+
+        with col_grid2:
+            grid_timeframe = st.selectbox(
+                "Timeframe",
+                ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'],
+                index=4,
+                key="grid_timeframe"
+            )
+
+        with col_grid3:
+            grid_bars = st.number_input(
+                "Nombre de barres",
+                min_value=500,
+                max_value=100000,
+                value=10000,
+                step=500,
+                key="grid_bars",
+                help="💡 M5: 10,000-20,000 | H1: 2,000-5,000 | H4: 1,000-2,000"
+            )
+
+            # Info sur la période selon le timeframe sélectionné
+            if grid_timeframe == 'M5':
+                days = (grid_bars * 5) / (60 * 24)
+                st.caption(f"📅 ≈ {days:.0f} jours de données")
+            elif grid_timeframe == 'M15':
+                days = (grid_bars * 15) / (60 * 24)
+                st.caption(f"📅 ≈ {days:.0f} jours de données")
+            elif grid_timeframe == 'M30':
+                days = (grid_bars * 30) / (60 * 24)
+                st.caption(f"📅 ≈ {days:.0f} jours de données")
+            elif grid_timeframe == 'H1':
+                days = grid_bars / 24
+                st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
+            elif grid_timeframe == 'H4':
+                days = (grid_bars * 4) / 24
+                st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
+            elif grid_timeframe == 'D1':
+                days = grid_bars
+                st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
+
+        # Afficher le nombre de combinaisons a tester
+        try:
+            total_combinations = len(generate_all_combinations())
+            st.metric("🔢 Nombre de combinaisons a tester", f"{total_combinations}")
+        except:
+            st.metric("🔢 Nombre de combinaisons a tester", "~500")
+
+        # Section: Workers
+        col_worker1, col_worker2 = st.columns(2)
+
+        with col_worker1:
+            import multiprocessing as mp
+            # IMPORTANT: Limiter a 2 workers par defaut pour eviter crash memoire
+            recommended_workers = min(2, max(1, mp.cpu_count() - 2))
+            grid_workers = st.slider(
+                "Nombre de workers paralleles",
+                min_value=1,
+                max_value=20,
+                value=recommended_workers,
+                key="grid_workers",
+                help=f"⚠️ IMPORTANT: ne mettez ppas tout vos workers, cela peut faire planter votre pc. Votre système a {mp.cpu_count()} CPU mais chaque worker charge les données MT5 en RAM."
+            )
+
+            if grid_workers > 10:
+                st.warning("⚠️ Attention: >10 workers peut crasher si RAM insuffisante!")
+
+        with col_worker2:
+            # Estimation du temps basée sur le nombre de barres
+            # Plus de barres = backtest plus long
+            if grid_bars < 2000:
+                sec_per_test = 5
+            elif grid_bars < 10000:
+                sec_per_test = 10
+            else:
+                sec_per_test = 15
+
+            estimated_minutes = (total_combinations * sec_per_test) / grid_workers / 60
+
+            if estimated_minutes < 60:
+                st.metric("⏱️ Temps estimé", f"{estimated_minutes:.0f} min")
+            else:
+                hours = estimated_minutes / 60
+                st.metric("⏱️ Temps estimé", f"{hours:.1f} heures")
+
+            if grid_workers == 1:
+                st.caption("✅ Mode séquentiel (le plus stable)")
+            else:
+                st.caption(f"⚡ {grid_workers} tests simultanés")
+
+        st.markdown("---")
+
+        # Bouton de lancement
+        col_btn1, col_btn2 = st.columns([1, 3])
+
+        with col_btn1:
+            start_grid = st.button(
+                "🚀 Lancer Grid Testing",
+                type="primary",
+                use_container_width=True,
+                key="start_grid_button"
+            )
+
+        # Lancer le grid search
+        if start_grid:
+            st.info(f"🚀 Lancement du Grid Testing avec {grid_workers} workers...")
+
+            # Creer le dossier Grid/ s'il n'existe pas
+            os.makedirs('Grid', exist_ok=True)
+
+            # Barre de progression
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            # Callback de progression
+            def update_progress(completed, total):
+                progress = completed / total
+                progress_bar.progress(progress)
+                status_text.text(f"Progression: {completed}/{total} tests completes ({progress*100:.1f}%)")
+
+            try:
+                # Lancer le grid search
+                with st.spinner("Execution des tests en cours..."):
+                    results = run_grid_search(
+                        symbol=grid_symbol,
+                        timeframe=grid_timeframe,
+                        bars=grid_bars,
+                        max_workers=grid_workers,
+                        callback=update_progress
+                    )
+
+                # Sauvegarder les resultats
+                report_path = save_top_results(
+                    results=results,
+                    symbol=grid_symbol,
+                    timeframe=grid_timeframe,
+                    bars=grid_bars,
+                    top_n=5
+                )
+
+                st.success(f"✅ Grid Testing termine! Rapport sauvegarde: {report_path}")
+
+                # Afficher les top 5 resultats
+                st.subheader("🏆 Top 5 Configurations")
+
+                for i, result in enumerate(results[:5], 1):
+                    with st.expander(f"#{i} - Score: {result['composite_score']:.4f}", expanded=(i==1)):
+                        # Metriques principales
+                        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+
+                        with col_m1:
+                            st.metric("PnL", f"{result['pnl_pct']:.2f}%")
+
+                        with col_m2:
+                            st.metric("Win Rate", f"{result['win_rate']:.2f}%")
+
+                        with col_m3:
+                            st.metric("Sharpe", f"{result['sharpe_ratio']:.3f}")
+
+                        with col_m4:
+                            st.metric("Max DD", f"{result['max_drawdown_pct']:.2f}%")
+
+                        with col_m5:
+                            st.metric("Trades", result['total_trades'])
+
+                        # Parametres
+                        st.markdown("**Parametres:**")
+                        params_df = pd.DataFrame([result['params']]).T
+                        params_df.columns = ['Valeur']
+                        st.dataframe(params_df, use_container_width=True)
+
+                        # Bouton pour sauvegarder cette config
+                        col_save1, col_save2 = st.columns([1, 3])
+                        with col_save1:
+                            config_name = st.text_input(
+                                "Nom de la config",
+                                value=f"GridOptim_{i}",
+                                key=f"config_name_{i}"
+                            )
+                        with col_save2:
+                            if st.button(f"💾 Sauvegarder comme nouvelle config", key=f"save_config_{i}"):
+                                # Sauvegarder dans config/
+                                config_path = f"config/{config_name}.json"
+                                try:
+                                    with open(config_path, 'w', encoding='utf-8') as f:
+                                        json.dump(result['params'], f, indent=4)
+                                    st.success(f"✅ Configuration sauvegardee: {config_path}")
+                                except Exception as e:
+                                    st.error(f"❌ Erreur: {e}")
+
+            except Exception as e:
+                st.error(f"❌ Erreur lors du Grid Testing: {e}")
+                st.exception(e)
+
+        st.markdown("---")
+
+        # Section: Historique des Grid Tests
+        st.subheader("📊 Historique des Grid Tests")
+
+        grid_dir = 'Grid'
+        if os.path.exists(grid_dir):
+            grid_files = sorted(
+                [os.path.join(grid_dir, f) for f in os.listdir(grid_dir)
+                 if f.startswith('grid_results_') and f.endswith('.json')],
+                reverse=True
+            )
+
+            if grid_files:
+                selected_grid = st.selectbox(
+                    "Selectionner un rapport",
+                    grid_files,
+                    format_func=lambda x: os.path.basename(x),
+                    key="select_grid_report"
+                )
+
+                try:
+                    with open(selected_grid, 'r', encoding='utf-8') as f:
+                        grid_report = json.load(f)
+
+                    # Afficher les metadonnees
+                    metadata = grid_report.get('metadata', {})
+                    col_meta1, col_meta2, col_meta3, col_meta4 = st.columns(4)
+
+                    with col_meta1:
+                        st.metric("Symbole", metadata.get('symbol', 'N/A'))
+
+                    with col_meta2:
+                        st.metric("Timeframe", metadata.get('timeframe', 'N/A'))
+
+                    with col_meta3:
+                        st.metric("Barres", metadata.get('bars', 'N/A'))
+
+                    with col_meta4:
+                        st.metric("Tests", metadata.get('total_tests', 'N/A'))
+
+                    st.caption(f"Date: {metadata.get('date', 'N/A')}")
+
+                    st.markdown("---")
+
+                    # Afficher le top 5 sauvegarde
+                    st.markdown("**🏆 Top 5 Configurations:**")
+
+                    top_configs = grid_report.get('top_configs', [])
+
+                    # Creer un tableau resume
+                    summary_data = []
+                    for i, config in enumerate(top_configs, 1):
+                        summary_data.append({
+                            'Rang': f"#{i}",
+                            'Score': f"{config['composite_score']:.4f}",
+                            'PnL (%)': f"{config['pnl_pct']:.2f}",
+                            'Win Rate (%)': f"{config['win_rate']:.2f}",
+                            'Sharpe': f"{config['sharpe_ratio']:.3f}",
+                            'Max DD (%)': f"{config['max_drawdown_pct']:.2f}",
+                            'Trades': config['total_trades']
+                        })
+
+                    summary_df = pd.DataFrame(summary_data)
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                    # Details de chaque config
+                    for i, config in enumerate(top_configs, 1):
+                        with st.expander(f"Details #{i}"):
+                            params_df = pd.DataFrame([config['params']]).T
+                            params_df.columns = ['Valeur']
+                            st.dataframe(params_df, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"❌ Erreur lors du chargement: {e}")
+            else:
+                st.info("Aucun rapport de Grid Testing disponible")
+        else:
+            st.info("Aucun rapport de Grid Testing disponible")
 
 # Footer
 st.markdown("---")
