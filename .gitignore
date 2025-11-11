@@ -12,6 +12,7 @@ backtest/
 machineLearning/
 log/
 Grid/
+cache_mt5/
 
 # Private documents
 Commandes
@@ -53,11 +54,23 @@ ENV/
 .claude/
 *.swp
 *.swo
-*~
 
 # Logs
 *.log
 
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# CSV exports and data files
+*.csv
+*.xlsx
+*.xls
+
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini

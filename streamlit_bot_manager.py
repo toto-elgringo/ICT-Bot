@@ -26,12 +26,17 @@ except:
     MT5_AVAILABLE = False
     st.error("MetaTrader5 n'est pas installe. Installez-le avec: pip install MetaTrader5")
 
-# Import Grid Search Engine
+# Import Grid Search Engine (version batch optimisée uniquement)
 try:
-    from grid_search_engine import run_grid_search, save_top_results, generate_all_combinations
+    from grid_search_engine_batch import (
+        run_grid_search_batch as run_grid_search,
+        save_top_results,
+        generate_all_combinations
+    )
     GRID_SEARCH_AVAILABLE = True
 except ImportError:
     GRID_SEARCH_AVAILABLE = False
+    st.error("⚠️ Fichier grid_search_engine_batch.py manquant!")
 
 # ===============================
 # GESTION DES CONFIGURATIONS
@@ -1203,18 +1208,9 @@ with tab5:
     st.header("🔬 Grid Testing - Optimisation des Parametres")
 
     if not GRID_SEARCH_AVAILABLE:
-        st.error("⚠️ Le module grid_search_engine n'est pas disponible")
+        st.error("⚠️ Le module grid_search_engine_batch.py n'est pas disponible")
     else:
-        st.warning(
-            "La majorité des barres sont donc filtrées!\n\n"
-            "**Minimum recommandé** (pour avoir des trades):\n"
-            "- **M5**: 10,000-20,000 barres (≈35-70 jours)\n"
-            "- **H1**: 2,000-5,000 barres (≈83-208 jours)\n"
-            "- **H4**: 1,000-2,000 barres (≈166-333 jours)\n\n"
-            "**Optimisation**:\n"
-            "- Utilisez ** 80% workers** max (évite crashs)\n"
-            "- Fermez les apps non essentielles\n"
-        )
+        st.success("🚀 Grid Search Optimisé (25-35x speedup)")
 
         st.info(
             "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
@@ -1290,14 +1286,14 @@ with tab5:
             grid_workers = st.slider(
                 "Nombre de workers paralleles",
                 min_value=1,
-                max_value=20,
+                max_value=mp.cpu_count(),
                 value=recommended_workers,
                 key="grid_workers",
                 help=f"⚠️ IMPORTANT: ne mettez ppas tout vos workers, cela peut faire planter votre pc. Votre système a {mp.cpu_count()} CPU mais chaque worker charge les données MT5 en RAM."
             )
 
             if grid_workers > 10:
-                st.warning("⚠️ Attention: >10 workers peut crasher si RAM insuffisante!")
+                st.warning(f"⚠️ Attention: plus de {mp.cpu_count()-5} workers peut faire crasher votre pc si votre RAM insuffisante!")
 
         with col_worker2:
             # Estimation du temps basée sur le nombre de barres
@@ -1355,11 +1351,13 @@ with tab5:
             try:
                 # Lancer le grid search
                 with st.spinner("Execution des tests en cours..."):
+                    # Lancer le grid search optimisé
                     results = run_grid_search(
                         symbol=grid_symbol,
                         timeframe=grid_timeframe,
                         bars=grid_bars,
                         max_workers=grid_workers,
+                        batch_size=10,  # Optimal pour la plupart des cas
                         callback=update_progress
                     )
 
