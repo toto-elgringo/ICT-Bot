@@ -331,14 +331,23 @@ def get_open_positions_bot(login, password, server):
 
 def run_backtest_with_params(config_name, symbol, timeframe, bars):
     """Lance un backtest avec la configuration specifiee"""
-    # Lancer le backtest avec le nombre de barres specifie et la config
-    cmd = f'python ict_bot_all_in_one.py --mode backtest --symbol {symbol} --timeframe {timeframe} --bars {bars} --config-name {config_name}'
+    # Utiliser une liste d'arguments au lieu d'une string pour éviter les problèmes de parsing
+    cmd = [
+        'python',
+        'ict_bot_all_in_one.py',
+        '--mode', 'backtest',
+        '--symbol', str(symbol),
+        '--timeframe', str(timeframe),
+        '--bars', str(bars),
+        '--config-name', str(config_name)
+    ]
 
     # Timeout adaptatif selon le nombre de barres
     # ~30 secondes par 100k barres + 5 minutes de marge
     timeout = max(1800, int(bars / 100000 * 30 + 300))
 
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    # Ne PAS utiliser shell=True pour éviter les problèmes de parsing
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     return result.returncode == 0, result.stdout, result.stderr
 
@@ -1229,7 +1238,7 @@ with tab5:
             grid_timeframe = st.selectbox(
                 "Timeframe",
                 ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'],
-                index=4,
+                index=1,
                 key="grid_timeframe"
             )
 
@@ -1238,7 +1247,7 @@ with tab5:
                 "Nombre de barres",
                 min_value=500,
                 max_value=100000,
-                value=10000,
+                value=100000,
                 step=500,
                 key="grid_bars",
                 help="💡 M5: 10,000-20,000 | H1: 2,000-5,000 | H4: 1,000-2,000"
