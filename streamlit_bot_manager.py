@@ -70,7 +70,16 @@ def create_default_config():
             'ATR_FVG_MAX_RATIO': 2.5,
             'USE_CIRCUIT_BREAKER': True,
             'DAILY_DD_LIMIT': 0.03,
-            'USE_ADAPTIVE_RISK': True
+            'USE_ADAPTIVE_RISK': True,
+            # NOUVEAUX PARAMETRES v2.1
+            'USE_FVG_MITIGATION_FILTER': True,
+            'USE_BOS_RECENCY_FILTER': True,
+            'USE_MARKET_STRUCTURE_FILTER': True,
+            'BOS_MAX_AGE': 20,
+            'FVG_BOS_MAX_DISTANCE': 20,
+            'USE_ORDER_BLOCK_SL': True,
+            'USE_EXTREME_VOLATILITY_FILTER': True,
+            'VOLATILITY_MULTIPLIER_MAX': 3.0
         }
         with open(default_config_path, 'w') as f:
             json.dump(default_config, f, indent=4)
@@ -160,6 +169,42 @@ def delete_ml_model(bot_name):
         except Exception as e:
             return False, f"Erreur lors de la suppression du modèle ML: {e}"
     return True, "Aucun modèle ML à supprimer"
+
+def delete_all_ml_models():
+    """Supprime TOUS les fichiers .pkl du dossier machineLearning/ (utile pour v2.1 upgrade)"""
+    ensure_ml_directory()
+    deleted_count = 0
+    errors = []
+
+    for file in os.listdir('machineLearning'):
+        if file.endswith('.pkl'):
+            try:
+                os.remove(os.path.join('machineLearning', file))
+                deleted_count += 1
+            except Exception as e:
+                errors.append(f"{file}: {e}")
+
+    if errors:
+        return False, f"Supprimé {deleted_count} modèles, {len(errors)} erreurs: {', '.join(errors)}"
+    return True, f"✅ {deleted_count} modèles ML supprimés avec succès"
+
+def check_ml_model_compatibility(bot_name):
+    """Vérifie si le modèle ML d'un bot existe et retourne un avertissement si incompatible v2.1"""
+    ml_path = get_ml_model_path(bot_name)
+    if not os.path.exists(ml_path):
+        return "warning", "Aucun modèle ML trouvé - sera créé au premier démarrage"
+
+    # Vérifier si c'est un ancien modèle (v2.0 = 5 features, v2.1 = 12 features)
+    try:
+        import joblib
+        model = joblib.load(ml_path)
+        # Si le modèle a été entraîné, vérifier le nombre de features
+        if hasattr(model, 'n_features_in_'):
+            if model.n_features_in_ < 12:
+                return "error", f"⚠️ Modèle v2.0 incompatible ({model.n_features_in_} features, 12 attendues). Supprimez le modèle."
+        return "success", "Modèle ML compatible v2.1"
+    except Exception as e:
+        return "warning", f"Impossible de vérifier le modèle: {e}"
 
 # ===============================
 # GESTION DES LOGS
@@ -410,6 +455,15 @@ if 'config' not in st.session_state:
         'USE_CIRCUIT_BREAKER': True,
         'DAILY_DD_LIMIT': 0.03,
         'USE_ADAPTIVE_RISK': True,
+        # NOUVEAUX PARAMETRES v2.1
+        'USE_FVG_MITIGATION_FILTER': True,
+        'USE_BOS_RECENCY_FILTER': True,
+        'USE_MARKET_STRUCTURE_FILTER': True,
+        'BOS_MAX_AGE': 20,
+        'FVG_BOS_MAX_DISTANCE': 20,
+        'USE_ORDER_BLOCK_SL': True,
+        'USE_EXTREME_VOLATILITY_FILTER': True,
+        'VOLATILITY_MULTIPLIER_MAX': 3.0,
         'SYMBOL': 'EURUSD',
         'TIMEFRAME': 'M5'
     }
@@ -417,8 +471,9 @@ if 'config' not in st.session_state:
 # ===============================
 # TITRE PRINCIPAL
 # ===============================
-st.title("🤖 ICT Trading Bot Manager v2.0")
+st.title("🤖 ICT Trading Bot Manager v2.1")
 st.markdown("### Centre de Controle Avance avec Suivi Temps Reel")
+st.info("✨ **Nouveau v2.1** : Filtres ICT ameliores (mitigation FVG, recence BOS, structure marche, Order Blocks SL, volatilite extreme)")
 st.markdown("---")
 
 # ===============================
@@ -440,6 +495,24 @@ with st.sidebar:
 
     if st.button("🔄 Rafraichir", use_container_width=True):
         st.rerun()
+
+    st.markdown("---")
+
+    # Section Maintenance ML
+    with st.expander("🧹 Maintenance ML v2.1"):
+        st.caption("⚠️ Les modèles ML v2.0 sont incompatibles avec v2.1 (5 features → 12 features)")
+        st.caption("Si vous rencontrez des erreurs au démarrage, supprimez les anciens modèles.")
+
+        if st.button("🗑️ Supprimer TOUS les modèles ML", type="secondary", use_container_width=True, key="delete_all_ml"):
+            if active_bots > 0:
+                st.error("⚠️ Arrêtez d'abord tous les bots avant de supprimer les modèles ML")
+            else:
+                success, msg = delete_all_ml_models()
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+                st.rerun()
 
 # ===============================
 # ONGLETS PRINCIPAUX
@@ -626,6 +699,14 @@ with tab1:
                             st.success("✅ Bot actif")
                         else:
                             st.error("⏸️ Bot arrêté")
+
+                    # Vérification compatibilité ML (afficher un warning si modèle incompatible)
+                    ml_status, ml_message = check_ml_model_compatibility(bot['name'])
+                    if ml_status == "error":
+                        st.error(ml_message)
+                        st.caption("👉 Utilisez le bouton 'Supprimer TOUS les modèles ML' dans la sidebar")
+                    elif ml_status == "warning" and not is_running:
+                        st.warning(ml_message)
 
                     st.markdown("---")
 
@@ -876,7 +957,7 @@ with tab2:
                         )
 
                 with col3:
-                    st.subheader("🔧 Filtres")
+                    st.subheader("🔧 Filtres Generaux")
                     config['USE_ATR_FILTER'] = st.checkbox(
                         "Filtre ATR", config.get('USE_ATR_FILTER', False), key=f"atr_use_{config_name}"
                     )
@@ -899,6 +980,63 @@ with tab2:
                     config['USE_ADAPTIVE_RISK'] = st.checkbox(
                         "Risque Adaptatif", config.get('USE_ADAPTIVE_RISK', False), key=f"adapt_risk_{config_name}"
                     )
+
+                # Nouvelle colonne pour les filtres ICT v2.1
+                st.markdown("---")
+                col4, col5 = st.columns(2)
+
+                with col4:
+                    st.subheader("🎯 Filtres ICT v2.1")
+                    config['USE_FVG_MITIGATION_FILTER'] = st.checkbox(
+                        "FVG Mitigation Filter",
+                        config.get('USE_FVG_MITIGATION_FILTER', True),
+                        key=f"fvg_mitig_{config_name}",
+                        help="Ignore les FVG deja mitigees par le prix"
+                    )
+                    config['USE_BOS_RECENCY_FILTER'] = st.checkbox(
+                        "BOS Recency Filter",
+                        config.get('USE_BOS_RECENCY_FILTER', True),
+                        key=f"bos_rec_{config_name}",
+                        help="Le BOS doit etre recent (< BOS_MAX_AGE barres)"
+                    )
+                    if config['USE_BOS_RECENCY_FILTER']:
+                        config['BOS_MAX_AGE'] = st.slider(
+                            "BOS Max Age (barres)", 5, 50, config.get('BOS_MAX_AGE', 20), 5, key=f"bos_age_{config_name}"
+                        )
+
+                    config['USE_MARKET_STRUCTURE_FILTER'] = st.checkbox(
+                        "Market Structure Filter",
+                        config.get('USE_MARKET_STRUCTURE_FILTER', True),
+                        key=f"mkt_struct_{config_name}",
+                        help="Valide la structure HH/HL (bullish) ou LL/LH (bearish)"
+                    )
+
+                with col5:
+                    st.subheader("📊 Stop Loss & Volatilite")
+                    config['USE_ORDER_BLOCK_SL'] = st.checkbox(
+                        "Order Block SL",
+                        config.get('USE_ORDER_BLOCK_SL', True),
+                        key=f"ob_sl_{config_name}",
+                        help="Utilise les Order Blocks pour SL au lieu des swing points"
+                    )
+                    config['FVG_BOS_MAX_DISTANCE'] = st.slider(
+                        "FVG-BOS Distance Max", 5, 50, config.get('FVG_BOS_MAX_DISTANCE', 20), 5,
+                        key=f"fvg_bos_dist_{config_name}",
+                        help="Distance maximale entre FVG et BOS pour confluence"
+                    )
+
+                    config['USE_EXTREME_VOLATILITY_FILTER'] = st.checkbox(
+                        "Extreme Volatility Filter",
+                        config.get('USE_EXTREME_VOLATILITY_FILTER', True),
+                        key=f"extr_vol_{config_name}",
+                        help="Evite de trader en volatilite extreme (news, crash)"
+                    )
+                    if config['USE_EXTREME_VOLATILITY_FILTER']:
+                        config['VOLATILITY_MULTIPLIER_MAX'] = st.slider(
+                            "Volatilite Max (x median)", 1.5, 5.0, config.get('VOLATILITY_MULTIPLIER_MAX', 3.0), 0.5,
+                            key=f"vol_mult_{config_name}",
+                            help="ATR max = median_ATR * ce multiplicateur"
+                        )
 
                 col_save, col_cancel = st.columns(2)
                 with col_save:
@@ -1506,4 +1644,5 @@ with tab5:
 
 # Footer
 st.markdown("---")
-st.markdown("🤖 **ICT Trading Bot Manager v2.0** - Interface Avancee avec Suivi Temps Reel")
+st.markdown("🤖 **ICT Trading Bot Manager v2.1** - Interface Avancee avec Suivi Temps Reel")
+st.caption("✨ Nouveau v2.1 : FVG mitigation, BOS recency, market structure, Order Block SL, extreme volatility filter")
