@@ -474,7 +474,6 @@ if 'config' not in st.session_state:
 # ===============================
 st.title("🤖 ICT Trading Bot Manager v2.1")
 st.markdown("### Centre de Controle Avance avec Suivi Temps Reel")
-st.info("✨ **Nouveau v2.1** : Filtres ICT ameliores (mitigation FVG, recence BOS, structure marche, Order Blocks SL, volatilite extreme)")
 st.markdown("---")
 
 # ===============================
@@ -1163,17 +1162,6 @@ with tab3:
             help="Default recommandé pour la plupart des cas"
         )
 
-    with col2:
-        st.markdown("**Preset Info**")
-        if bt_config_name == "Conservative":
-            st.info("🛡️ Ultra-strict\n50-80 trades")
-        elif bt_config_name == "Default":
-            st.success("⭐ Équilibré\n150-200 trades")
-        elif bt_config_name == "Aggressive":
-            st.warning("⚡ Scalping\n300-400 trades")
-        else:
-            st.info("📝 Personnalisé")
-
     st.markdown("---")
     st.markdown("### 🔧 Paramètres du Backtest")
 
@@ -1204,8 +1192,6 @@ with tab3:
             step=1000,
             key="backtest_bars"
         )
-
-    st.info(f"ℹ️ Le backtest utilisera la configuration '{bt_config_name}' depuis le dossier config/")
 
     if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
@@ -1396,7 +1382,6 @@ with tab4:
                     hide_index=True
                 )
 
-                st.info(f"📈 {len(comparison_data)} backtest(s) comparé(s)")
             else:
                 st.warning("Aucun backtest valide sélectionné pour la comparaison")
         else:
@@ -1413,10 +1398,7 @@ with tab5:
     if not GRID_SEARCH_AVAILABLE:
         st.error("⚠️ Le module grid_search_engine_batch.py n'est pas disponible")
     else:
-        st.success("🚀 Grid Search Optimisé (25-35x speedup)")
-
         st.info(
-            "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
             "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)"
         )
 
@@ -1444,9 +1426,9 @@ with tab5:
             grid_workers = st.number_input(
                 "Workers parallèles",
                 min_value=1,
-                max_value=8,
+                max_value=20,
                 value=recommended_workers,
-                help="2 workers recommandés (meilleur ratio stabilité/vitesse)"
+                help="Nombre de coeur de processeur lors du calcul"
             )
 
         with col3:
