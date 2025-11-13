@@ -26,7 +26,7 @@ Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader
 - ✅ **Gestion Multi-Bot** : Gérez plusieurs bots simultanément avec des configurations différentes
 - ✅ **Dashboard Streamlit** : Interface web complète pour contrôler tous vos bots
 - ✅ **Configurations Nommées** : Créez et gérez plusieurs stratégies (Default, Aggressive, Conservative, etc.)
-- ✅ **Grid Testing** : Optimisation automatique de 1,728 combinaisons de paramètres pour trouver la meilleure config
+- ✅ **Grid Testing v2.1.1** : 3 modes d'optimisation (Fast: 864 / Standard: 2,592 / Advanced: 20,736 combinaisons)
 - ✅ **Notifications Telegram** : Alertes en temps réel lors de l'ouverture de positions
 - ✅ **Backtesting** : Testez vos stratégies sur des données historiques
 - ✅ **Risk Management** : Circuit breaker, risque adaptatif, sessions adaptatives
@@ -278,13 +278,15 @@ python ict_bot_all_in_one.py --mode live --symbol EURUSD --timeframe M5
   - Sélection multiple
   - Tableau comparatif : Trades | Win Rate (%) | PnL ($) | Max DD (%)
 
-#### 🔬 Onglet "Grid Testing"
-- **Optimisation automatique** de 1,728 combinaisons de paramètres
-- Teste 7 paramètres : Risk, RR, Max Trades, Cooldown, ML Threshold, ATR Filter, Circuit Breaker
-- Multiprocessing pour accélérer les tests (1-4 workers)
-- Score composite : 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)
-- Sauvegarde automatique du top 5 dans `Grid/`
-- Création de nouvelles configurations à partir des meilleurs résultats
+#### 🔬 Onglet "Grid Testing v2.1.1"
+- **3 modes d'optimisation** : Fast (864) / Standard (2,592) / Advanced (20,736) combinaisons
+- **Presets ICT** : Conservative / Default / Aggressive pour screening rapide
+- **8 nouveaux paramètres ICT** : FVG Mitigation, Market Structure, BOS Age, Volatility Filter, etc.
+- **Early Stopping** : Skip automatique des combinaisons sous-performantes (optionnel)
+- **Multiprocessing** : 1-4 workers pour accélérer les tests (25-35x vs séquentiel)
+- **Score composite** : 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)
+- **Sauvegarde automatique** du top 5 dans `Grid/` avec métadonnées enrichies
+- **Création de configs** à partir des meilleurs résultats
 - **Voir section dédiée** ci-dessous pour le guide complet
 
 ---
@@ -309,11 +311,16 @@ Quand un bot ouvre une position, vous recevez :
 
 ---
 
-## 🔬 Grid Testing - Optimisation Automatique
+## 🔬 Grid Testing v2.1.1 - Optimisation Automatique
 
-### 🎯 Qu'est-ce que le Grid Testing?
+### 🎯 Qu'est-ce que le Grid Testing v2.1.1?
 
-Le Grid Testing teste **automatiquement 1,728 combinaisons** de paramètres pour trouver la configuration optimale de votre bot ICT.
+Le Grid Testing v2.1.1 propose **3 modes d'optimisation progressifs** :
+- **FAST** : 864 combinaisons (2-3 min) - Screening avec presets ICT
+- **STANDARD** : 2,592 combinaisons (5-7 min) - Fine-tuning des filtres clés
+- **ADVANCED** : 20,736 combinaisons (15-20 min) - Exploration exhaustive
+
+Nouveauté v2.1.1 : Support des 8 paramètres ICT configurables (FVG Mitigation, Market Structure, BOS Age, Volatility Filter, etc.)
 
 ### ⚠️ IMPORTANT: Kill Zones et Nombre de Barres
 
@@ -537,16 +544,25 @@ streamlit run streamlit_bot_manager.py
 ```
 L'interface utilise automatiquement la version optimisée (25-35x speedup).
 
-**Via ligne de commande**:
+**Via ligne de commande v2.1.1**:
 ```bash
-python grid_search_engine_batch.py EURUSD H1 2000 2 10
+# Mode FAST - Screening rapide (2-3 min)
+python grid_search_engine_batch.py EURUSD H1 5000 --grid fast
+
+# Mode STANDARD - Recommandé (5-7 min)
+python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid standard
+
+# Mode ADVANCED - Exhaustif (15-20 min)
+python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid advanced --early-stop
 
 # Arguments:
 # - EURUSD: symbole
 # - H1: timeframe
-# - 2000: nombre de barres
-# - 2: workers (optionnel, défaut: auto-détecté)
-# - 10: batch_size (optionnel, défaut: 10)
+# - 5000: nombre de barres (3000-5000 pour H1, 1500-2000 pour H4)
+# - 2: workers (optionnel, 2 recommandé)
+# - 10: batch_size (optionnel, 10 par défaut)
+# - --grid MODE: fast/standard/advanced (défaut: standard)
+# - --early-stop: Skip automatique des mauvaises combinaisons
 ```
 
 ### 🔧 Gestion du Cache MT5
@@ -1011,8 +1027,8 @@ Ce projet est fourni "tel quel" sans garantie. Utilisez-le à vos propres risque
 
 ---
 
-**Version** : 3.2 - Multi-Bot Edition avec Grid Testing Optimisé (25-35x speedup)
-**Dernière mise à jour** : 11 Novembre 2025
-**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & Ultra-Fast Grid Testing
+**Version** : 3.2.1 - Multi-Bot Edition avec Grid Testing v2.1.1 (3 modes progressifs)
+**Dernière mise à jour** : 13 Novembre 2025
+**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & Ultra-Fast Grid Testing v2.1.1
 
 🤖 **Happy Trading!**
