@@ -816,7 +816,21 @@ class MLFilter:
             return 0.99
 
         if not self.enabled or self.model is None or len(self.X) < self.min_samples:
-            gap, rng, vol, bias, kz = x.flatten()
+            # x contient 12 features (v2.1.1), extraire les features necessaires
+            features = x.flatten()
+            gap = features[0]      # Taille du FVG
+            rng = features[1]      # Range du marche
+            vol = features[2]      # Volume
+            bias = features[3]     # Biais (-1/0/1)
+            kz = features[4]       # Kill zone (0/1)
+            atr_norm = features[5]         # ATR normalise (v2.1)
+            fvg_atr_ratio = features[6]    # Qualite FVG (v2.1)
+            bos_proximity = features[7]    # Proximite BOS-FVG (v2.1)
+            structure_score = features[8]  # Coherence structure (v2.1)
+            bos_strength = features[9]     # Force du BOS (v2.1)
+            pos_in_fvg = features[10]      # Position dans FVG (v2.1)
+            momentum = features[11]        # Momentum prix (v2.1)
+
             if rng <= 0: return 0.5
             rel = gap / rng
             base = 0.50 + 0.20*rel + 0.05*kz + 0.05*(1 if bias!=0 else 0)
