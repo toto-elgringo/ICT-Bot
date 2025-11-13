@@ -372,18 +372,30 @@ def detect_bos(df: pd.DataFrame):
             last_sl = lows[i]
             last_sl_idx = i
 
-        # BOS haussier : close dépasse swing high RECENT (< 20 barres) avec force
+        # BOS haussier : close dépasse swing high avec validation de recence optionnelle
         if not np.isnan(last_sh) and closes[i] > last_sh:
             bars_since = i - last_sh_idx
-            if bars_since <= 20:  # NOUVEAU : BOS doit être récent
+            if USE_BOS_RECENCY_FILTER:
+                if bars_since <= BOS_MAX_AGE:  # Use config variable
+                    penetration = closes[i] - last_sh
+                    bos_up[i] = True
+                    bos_strength[i] = penetration
+            else:
+                # No recency filter - accept all BOS
                 penetration = closes[i] - last_sh
                 bos_up[i] = True
                 bos_strength[i] = penetration
 
-        # BOS baissier : close sous swing low RECENT (< 20 barres) avec force
+        # BOS baissier : close sous swing low avec validation de recence optionnelle
         if not np.isnan(last_sl) and closes[i] < last_sl:
             bars_since = i - last_sl_idx
-            if bars_since <= 20:  # NOUVEAU : BOS doit être récent
+            if USE_BOS_RECENCY_FILTER:
+                if bars_since <= BOS_MAX_AGE:  # Use config variable
+                    penetration = last_sl - closes[i]
+                    bos_dn[i] = True
+                    bos_strength[i] = penetration
+            else:
+                # No recency filter - accept all BOS
                 penetration = last_sl - closes[i]
                 bos_dn[i] = True
                 bos_strength[i] = penetration
@@ -562,10 +574,19 @@ def infer_bias(row) -> str:
     has_bullish_structure = row.get('market_structure', 'neutral') == 'bullish'
     has_bearish_structure = row.get('market_structure', 'neutral') == 'bearish'
 
-    if row['bos_up'] and not row['bos_down'] and has_bullish_structure:
-        return 'bull'
-    if row['bos_down'] and not row['bos_up'] and has_bearish_structure:
-        return 'bear'
+    if USE_MARKET_STRUCTURE_FILTER:
+        # STRICT: Require BOS + matching market structure
+        if row['bos_up'] and not row['bos_down'] and has_bullish_structure:
+            return 'bull'
+        elif row['bos_down'] and not row['bos_up'] and has_bearish_structure:
+            return 'bear'
+    else:
+        # PERMISSIVE: Only require BOS
+        if row['bos_up'] and not row['bos_down']:
+            return 'bull'
+        elif row['bos_down'] and not row['bos_up']:
+            return 'bear'
+
     return 'neutral'
 
 # ===============================
@@ -573,24 +594,25 @@ def infer_bias(row) -> str:
 # ===============================
 
 def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
-    """Cherche le FVG le plus récent NON MITIGÉ où le prix actuel est à l'intérieur + validation confluence BOS"""
+    """Cherche le FVG le plus récent (optionnellement NON MITIGÉ) où le prix actuel est à l'intérieur + validation confluence BOS"""
     fvg_side = df['fvg_side'].values
     bull_top = df['fvg_bull_top'].values
     bull_bot = df['fvg_bull_bot'].values
     bear_top = df['fvg_bear_top'].values
     bear_bot = df['fvg_bear_bot'].values
     closes = df['close'].values
-    fvg_mitigated = df['fvg_mitigated'].values  # NOUVEAU
-    bos_up = df['bos_up'].values  # NOUVEAU
-    bos_down = df['bos_down'].values  # NOUVEAU
+    fvg_mitigated = df['fvg_mitigated'].values
+    bos_up = df['bos_up'].values
+    bos_down = df['bos_down'].values
 
     px = closes[idx]
     start = max(idx - max_lookback, 2)
 
-    # NOUVEAU : Chercher le BOS le plus récent pour valider la confluence
+    # Chercher le BOS le plus récent pour valider la confluence
     last_bos_bull_idx = -1
     last_bos_bear_idx = -1
-    for j in range(idx - 1, max(idx - 30, 0), -1):  # Chercher sur 30 barres
+    lookback_limit = BOS_MAX_AGE + 10 if USE_BOS_RECENCY_FILTER else 50
+    for j in range(idx - 1, max(0, idx - lookback_limit), -1):
         if bos_up[j] and last_bos_bull_idx == -1:
             last_bos_bull_idx = j
         if bos_down[j] and last_bos_bear_idx == -1:
@@ -601,19 +623,19 @@ def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
     for j in range(idx - 1, start - 1, -1):
         side = fvg_side[j]
 
-        # NOUVEAU : Ignorer les FVG mitigés
-        if fvg_mitigated[j]:
+        # Check FVG mitigation filter flag
+        if USE_FVG_MITIGATION_FILTER and fvg_mitigated[j]:
             continue
 
         if side == 'bull':
             top = bull_top[j]
             bot = bull_bot[j]
             if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
-                # NOUVEAU : Valider que le FVG est dans la même direction que le dernier BOS
-                # ET que le BOS est proche (< 20 barres du FVG)
+                # Valider que le FVG est dans la même direction que le dernier BOS
+                # ET que le BOS est proche (utiliser config variable)
                 if last_bos_bull_idx != -1:
                     bars_between = abs(j - last_bos_bull_idx)
-                    if bars_between <= 20:  # Confluence temporelle
+                    if bars_between <= FVG_BOS_MAX_DISTANCE:  # Use config variable
                         mid = (top + bot) / 2.0
                         return dict(side='bull', top=top, bot=bot, mid=mid, idx_fvg=j,
                                     bos_distance=bars_between, has_confluence=True)
@@ -621,10 +643,10 @@ def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
             top = bear_top[j]
             bot = bear_bot[j]
             if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
-                # NOUVEAU : Valider que le FVG est dans la même direction que le dernier BOS
+                # Valider que le FVG est dans la même direction que le dernier BOS
                 if last_bos_bear_idx != -1:
                     bars_between = abs(j - last_bos_bear_idx)
-                    if bars_between <= 20:  # Confluence temporelle
+                    if bars_between <= FVG_BOS_MAX_DISTANCE:  # Use config variable
                         mid = (top + bot) / 2.0
                         return dict(side='bear', top=top, bot=bot, mid=mid, idx_fvg=j,
                                     bos_distance=bars_between, has_confluence=True)
@@ -1671,7 +1693,15 @@ def main():
                             "ATR_FVG_MAX_RATIO": ATR_FVG_MAX_RATIO,
                             "USE_CIRCUIT_BREAKER": USE_CIRCUIT_BREAKER,
                             "DAILY_DD_LIMIT": DAILY_DD_LIMIT,
-                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK
+                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK,
+                            "USE_FVG_MITIGATION_FILTER": USE_FVG_MITIGATION_FILTER,
+                            "USE_BOS_RECENCY_FILTER": USE_BOS_RECENCY_FILTER,
+                            "USE_MARKET_STRUCTURE_FILTER": USE_MARKET_STRUCTURE_FILTER,
+                            "BOS_MAX_AGE": BOS_MAX_AGE,
+                            "FVG_BOS_MAX_DISTANCE": FVG_BOS_MAX_DISTANCE,
+                            "USE_ORDER_BLOCK_SL": USE_ORDER_BLOCK_SL,
+                            "USE_EXTREME_VOLATILITY_FILTER": USE_EXTREME_VOLATILITY_FILTER,
+                            "VOLATILITY_MULTIPLIER_MAX": VOLATILITY_MULTIPLIER_MAX
                         }
                     }
                     with open(filename, 'w', encoding='utf-8') as f:
