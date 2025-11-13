@@ -29,6 +29,7 @@ Usage:
 """
 
 import os
+import sys
 import json
 import itertools
 import multiprocessing as mp
@@ -37,6 +38,13 @@ from typing import List, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+
+# Initialiser colorama pour Windows (fix affichage tqdm)
+try:
+    import colorama
+    colorama.init()
+except ImportError:
+    pass  # Colorama optionnel (Linux/Mac n'en ont pas besoin)
 
 
 # Classe simple pour wrapper le dictionnaire info en objet
@@ -298,7 +306,8 @@ def init_worker_batch(df_data, info_data):
     _ict_bot_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(_ict_bot_module)
 
-    print(f"[WORKER {mp.current_process().name}] Initialisé avec données partagées")
+    # Logging silencieux pour éviter interférence avec tqdm
+    # (Utiliser tqdm.write() si vraiment nécessaire)
 
 
 def run_single_backtest_batch(args: Tuple[int, Dict[str, Any]]) -> Dict[str, Any]:
@@ -530,9 +539,16 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
         global _shared_df, _shared_info
         init_worker_batch(df, info_dict)
 
-        # Barre de progression avec tqdm
-        with tqdm(total=total_tests, desc="Grid Search", unit="test",
-                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+        # Barre de progression avec tqdm (configuration optimisée Windows/Linux)
+        with tqdm(
+            total=total_tests,
+            desc="Grid Search",
+            unit="test",
+            ncols=100,  # Largeur fixe pour éviter redimensionnement
+            file=sys.stderr,  # Redirection stderr pour éviter conflits avec print()
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+            disable=False
+        ) as pbar:
             for batch in batches:
                 batch_results = run_batch_of_backtests(batch)
                 results.extend(batch_results)
@@ -559,9 +575,16 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
         # Mode parallele avec batch processing
         print(f"[GRID SEARCH BATCH] Mode parallele ({max_workers} workers)")
 
-        # Barre de progression avec tqdm pour mode parallèle
-        with tqdm(total=total_tests, desc="Grid Search (parallel)", unit="test",
-                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+        # Barre de progression avec tqdm pour mode parallèle (configuration optimisée)
+        with tqdm(
+            total=total_tests,
+            desc="Grid Search (parallel)",
+            unit="test",
+            ncols=100,  # Largeur fixe
+            file=sys.stderr,  # Redirection stderr
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+            disable=False
+        ) as pbar:
             with mp.Pool(processes=max_workers, initializer=init_worker_batch, initargs=(df, info_dict)) as pool:
                 for batch_results in pool.imap_unordered(run_batch_of_backtests, batches, chunksize=1):
                     results.extend(batch_results)
