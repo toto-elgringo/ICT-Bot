@@ -124,6 +124,18 @@ DAILY_DD_LIMIT = 0.03
 USE_ADAPTIVE_RISK = True
 RISK_REDUCTION_FACTOR = 0.5
 
+# NOUVEAUX FILTRES ICT (version améliorée)
+USE_FVG_MITIGATION_FILTER = True  # Ignorer les FVG déjà mitigés
+USE_BOS_RECENCY_FILTER = True     # BOS doit être récent (< 20 barres)
+USE_MARKET_STRUCTURE_FILTER = True # Valider structure HH/HL ou LL/LH
+BOS_MAX_AGE = 20                   # Age max du BOS (en barres)
+FVG_BOS_MAX_DISTANCE = 20          # Distance max FVG-BOS pour confluence
+USE_ORDER_BLOCK_SL = True          # Utiliser Order Blocks pour SL au lieu de swings
+
+# FILTRE DE VOLATILITÉ EXTRÊME (nouveau v2.1)
+USE_EXTREME_VOLATILITY_FILTER = True  # Éviter de trader en volatilité extrême
+VOLATILITY_MULTIPLIER_MAX = 3.0       # ATR max acceptable (× médiane ATR)
+
 MAGIC_NUMBER = 161803
 COMMENT = "ICTv1"
 
@@ -188,6 +200,9 @@ def load_config_from_file(config_name='Default'):
     global USE_ATR_FILTER, ATR_FVG_MIN_RATIO, ATR_FVG_MAX_RATIO
     global USE_CIRCUIT_BREAKER, DAILY_DD_LIMIT
     global USE_ADAPTIVE_RISK
+    global USE_FVG_MITIGATION_FILTER, USE_BOS_RECENCY_FILTER, USE_MARKET_STRUCTURE_FILTER
+    global BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, USE_ORDER_BLOCK_SL
+    global USE_EXTREME_VOLATILITY_FILTER, VOLATILITY_MULTIPLIER_MAX
 
     # Construire le chemin vers le fichier de config
     filepath = f'config/{config_name}.json'
@@ -224,11 +239,24 @@ def load_config_from_file(config_name='Default'):
 
         USE_ADAPTIVE_RISK = config.get('USE_ADAPTIVE_RISK', USE_ADAPTIVE_RISK)
 
+        # NOUVEAUX : Charger les filtres ICT améliorés
+        USE_FVG_MITIGATION_FILTER = config.get('USE_FVG_MITIGATION_FILTER', USE_FVG_MITIGATION_FILTER)
+        USE_BOS_RECENCY_FILTER = config.get('USE_BOS_RECENCY_FILTER', USE_BOS_RECENCY_FILTER)
+        USE_MARKET_STRUCTURE_FILTER = config.get('USE_MARKET_STRUCTURE_FILTER', USE_MARKET_STRUCTURE_FILTER)
+        BOS_MAX_AGE = config.get('BOS_MAX_AGE', BOS_MAX_AGE)
+        FVG_BOS_MAX_DISTANCE = config.get('FVG_BOS_MAX_DISTANCE', FVG_BOS_MAX_DISTANCE)
+        USE_ORDER_BLOCK_SL = config.get('USE_ORDER_BLOCK_SL', USE_ORDER_BLOCK_SL)
+        USE_EXTREME_VOLATILITY_FILTER = config.get('USE_EXTREME_VOLATILITY_FILTER', USE_EXTREME_VOLATILITY_FILTER)
+        VOLATILITY_MULTIPLIER_MAX = config.get('VOLATILITY_MULTIPLIER_MAX', VOLATILITY_MULTIPLIER_MAX)
+
         print(f"[CONFIG] Configuration chargee depuis {filepath}")
         print(f"[CONFIG] RISK_PER_TRADE = {RISK_PER_TRADE}")
         print(f"[CONFIG] RR_TAKE_PROFIT = {RR_TAKE_PROFIT}")
         print(f"[CONFIG] MAX_CONCURRENT_TRADES = {MAX_CONCURRENT_TRADES}")
         print(f"[CONFIG] ML_THRESHOLD = {ML_THRESHOLD}")
+        print(f"[CONFIG] USE_FVG_MITIGATION_FILTER = {USE_FVG_MITIGATION_FILTER}")
+        print(f"[CONFIG] USE_MARKET_STRUCTURE_FILTER = {USE_MARKET_STRUCTURE_FILTER}")
+        print(f"[CONFIG] USE_EXTREME_VOLATILITY_FILTER = {USE_EXTREME_VOLATILITY_FILTER}")
 
     except Exception as e:
         print(f"[CONFIG] Erreur lors du chargement de {filepath}: {e}")
@@ -320,7 +348,7 @@ def swing_points(df: pd.DataFrame, left=2, right=2):
     return df
 
 def detect_bos(df: pd.DataFrame):
-    """Détecte les Break of Structure (BOS)"""
+    """Détecte les Break of Structure (BOS) avec validation de force"""
     n = len(df)
     swing_high = df['swing_high'].values
     swing_low = df['swing_low'].values
@@ -330,34 +358,54 @@ def detect_bos(df: pd.DataFrame):
 
     bos_up = np.zeros(n, dtype=bool)
     bos_dn = np.zeros(n, dtype=bool)
+    bos_strength = np.zeros(n, dtype=float)  # Force du BOS (en ATR)
     last_sh = np.nan
     last_sl = np.nan
+    last_sh_idx = -1
+    last_sl_idx = -1
 
     for i in range(n):
         if swing_high[i]:
             last_sh = highs[i]
+            last_sh_idx = i
         if swing_low[i]:
             last_sl = lows[i]
+            last_sl_idx = i
+
+        # BOS haussier : close dépasse swing high RECENT (< 20 barres) avec force
         if not np.isnan(last_sh) and closes[i] > last_sh:
-            bos_up[i] = True
+            bars_since = i - last_sh_idx
+            if bars_since <= 20:  # NOUVEAU : BOS doit être récent
+                penetration = closes[i] - last_sh
+                bos_up[i] = True
+                bos_strength[i] = penetration
+
+        # BOS baissier : close sous swing low RECENT (< 20 barres) avec force
         if not np.isnan(last_sl) and closes[i] < last_sl:
-            bos_dn[i] = True
+            bars_since = i - last_sl_idx
+            if bars_since <= 20:  # NOUVEAU : BOS doit être récent
+                penetration = last_sl - closes[i]
+                bos_dn[i] = True
+                bos_strength[i] = penetration
 
     df['bos_up'] = bos_up
     df['bos_down'] = bos_dn
+    df['bos_strength'] = bos_strength  # NOUVEAU
     return df
 
 def detect_fvg(df: pd.DataFrame):
-    """Détecte les Fair Value Gaps (FVG)"""
+    """Détecte les Fair Value Gaps (FVG) avec mitigation tracking"""
     n = len(df)
     highs = df['high'].values
     lows = df['low'].values
+    closes = df['close'].values
 
     bull_fvg_top = np.full(n, np.nan)
     bull_fvg_bot = np.full(n, np.nan)
     bear_fvg_top = np.full(n, np.nan)
     bear_fvg_bot = np.full(n, np.nan)
     fvg_side = np.array(['none'] * n, dtype=object)
+    fvg_mitigated = np.zeros(n, dtype=bool)  # NOUVEAU : tracking mitigation
 
     bull_mask = lows[2:] > highs[:-2]
     bull_indices = np.where(bull_mask)[0] + 2
@@ -373,11 +421,29 @@ def detect_fvg(df: pd.DataFrame):
         bear_fvg_bot[i] = highs[i]
         fvg_side[i] = 'bear'
 
+    # NOUVEAU : Tracker la mitigation des FVG
+    # Un FVG est "mitigé" quand le prix traverse 50% de sa hauteur
+    for i in range(n):
+        if fvg_side[i] == 'bull':
+            fvg_mid = (bull_fvg_top[i] + bull_fvg_bot[i]) / 2.0
+            # Chercher si le FVG a été mitigé dans les barres suivantes
+            for j in range(i+1, min(i+30, n)):  # Regarder 30 barres en avant
+                if closes[j] < fvg_mid:
+                    fvg_mitigated[i] = True
+                    break
+        elif fvg_side[i] == 'bear':
+            fvg_mid = (bear_fvg_top[i] + bear_fvg_bot[i]) / 2.0
+            for j in range(i+1, min(i+30, n)):
+                if closes[j] > fvg_mid:
+                    fvg_mitigated[i] = True
+                    break
+
     df['fvg_side'] = fvg_side
     df['fvg_bull_top'] = bull_fvg_top
     df['fvg_bull_bot'] = bull_fvg_bot
     df['fvg_bear_top'] = bear_fvg_top
     df['fvg_bear_bot'] = bear_fvg_bot
+    df['fvg_mitigated'] = fvg_mitigated  # NOUVEAU
     return df
 
 def detect_order_block(df: pd.DataFrame, lookback=10):
@@ -452,13 +518,53 @@ def enrich(df: pd.DataFrame):
     df = detect_fvg(df)
     df = detect_order_block(df, lookback=12)
     df = calculate_atr(df, period=14)
+    df = detect_market_structure(df, lookback=50)  # NOUVEAU
+    return df
+
+def detect_market_structure(df: pd.DataFrame, lookback=50):
+    """Détermine la structure de marché globale (Higher Highs/Lower Lows)"""
+    n = len(df)
+    structure = np.array(['neutral'] * n, dtype=object)
+    highs = df['high'].values
+    lows = df['low'].values
+    swing_high = df['swing_high'].values
+    swing_low = df['swing_low'].values
+
+    for i in range(lookback, n):
+        # Récupérer les swing highs et lows récents
+        start = max(0, i - lookback)
+        sh_indices = [j for j in range(start, i) if swing_high[j]]
+        sl_indices = [j for j in range(start, i) if swing_low[j]]
+
+        if len(sh_indices) >= 2 and len(sl_indices) >= 2:
+            # Vérifier si on fait des HH et HL (bullish structure)
+            recent_sh = [highs[j] for j in sh_indices[-2:]]
+            recent_sl = [lows[j] for j in sl_indices[-2:]]
+
+            hh = recent_sh[-1] > recent_sh[-2]  # Higher High
+            hl = recent_sl[-1] > recent_sl[-2]  # Higher Low
+
+            ll = recent_sl[-1] < recent_sl[-2]  # Lower Low
+            lh = recent_sh[-1] < recent_sh[-2]  # Lower High
+
+            if hh and hl:
+                structure[i] = 'bullish'
+            elif ll and lh:
+                structure[i] = 'bearish'
+            # Sinon reste neutral (structure mixte/range)
+
+    df['market_structure'] = structure
     return df
 
 def infer_bias(row) -> str:
-    """Détermine le biais de marché (bull/bear/neutral)"""
-    if row['bos_up'] and not row['bos_down']:
+    """Détermine le biais de marché (bull/bear/neutral) - AMÉLIORÉ"""
+    # NOUVEAU : Combine BOS + Market Structure pour confirmation
+    has_bullish_structure = row.get('market_structure', 'neutral') == 'bullish'
+    has_bearish_structure = row.get('market_structure', 'neutral') == 'bearish'
+
+    if row['bos_up'] and not row['bos_down'] and has_bullish_structure:
         return 'bull'
-    if row['bos_down'] and not row['bos_up']:
+    if row['bos_down'] and not row['bos_up'] and has_bearish_structure:
         return 'bear'
     return 'neutral'
 
@@ -467,46 +573,132 @@ def infer_bias(row) -> str:
 # ===============================
 
 def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
-    """Cherche le FVG le plus récent où le prix actuel est à l'intérieur"""
+    """Cherche le FVG le plus récent NON MITIGÉ où le prix actuel est à l'intérieur + validation confluence BOS"""
     fvg_side = df['fvg_side'].values
     bull_top = df['fvg_bull_top'].values
     bull_bot = df['fvg_bull_bot'].values
     bear_top = df['fvg_bear_top'].values
     bear_bot = df['fvg_bear_bot'].values
     closes = df['close'].values
+    fvg_mitigated = df['fvg_mitigated'].values  # NOUVEAU
+    bos_up = df['bos_up'].values  # NOUVEAU
+    bos_down = df['bos_down'].values  # NOUVEAU
 
     px = closes[idx]
     start = max(idx - max_lookback, 2)
 
+    # NOUVEAU : Chercher le BOS le plus récent pour valider la confluence
+    last_bos_bull_idx = -1
+    last_bos_bear_idx = -1
+    for j in range(idx - 1, max(idx - 30, 0), -1):  # Chercher sur 30 barres
+        if bos_up[j] and last_bos_bull_idx == -1:
+            last_bos_bull_idx = j
+        if bos_down[j] and last_bos_bear_idx == -1:
+            last_bos_bear_idx = j
+        if last_bos_bull_idx != -1 and last_bos_bear_idx != -1:
+            break
+
     for j in range(idx - 1, start - 1, -1):
         side = fvg_side[j]
+
+        # NOUVEAU : Ignorer les FVG mitigés
+        if fvg_mitigated[j]:
+            continue
+
         if side == 'bull':
             top = bull_top[j]
             bot = bull_bot[j]
             if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
-                mid = (top + bot) / 2.0
-                return dict(side='bull', top=top, bot=bot, mid=mid, idx_fvg=j)
+                # NOUVEAU : Valider que le FVG est dans la même direction que le dernier BOS
+                # ET que le BOS est proche (< 20 barres du FVG)
+                if last_bos_bull_idx != -1:
+                    bars_between = abs(j - last_bos_bull_idx)
+                    if bars_between <= 20:  # Confluence temporelle
+                        mid = (top + bot) / 2.0
+                        return dict(side='bull', top=top, bot=bot, mid=mid, idx_fvg=j,
+                                    bos_distance=bars_between, has_confluence=True)
         elif side == 'bear':
             top = bear_top[j]
             bot = bear_bot[j]
             if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
-                mid = (top + bot) / 2.0
-                return dict(side='bear', top=top, bot=bot, mid=mid, idx_fvg=j)
+                # NOUVEAU : Valider que le FVG est dans la même direction que le dernier BOS
+                if last_bos_bear_idx != -1:
+                    bars_between = abs(j - last_bos_bear_idx)
+                    if bars_between <= 20:  # Confluence temporelle
+                        mid = (top + bot) / 2.0
+                        return dict(side='bear', top=top, bot=bot, mid=mid, idx_fvg=j,
+                                    bos_distance=bars_between, has_confluence=True)
     return None
 
 def make_features_for_ml(df, idx, fvg):
-    """Extrait les features pour le ML"""
+    """Extrait les features pour le ML - VERSION AMÉLIORÉE avec 12 features"""
     window = df.iloc[max(0, idx-50):idx]
+    row = df.iloc[idx]
+
     if len(window) < 10:
         rng = 1e-6
         vol = 0.0
+        volatility = 0.0
     else:
         rng = (window['high'].max() - window['low'].min())
         vol = window['tick_volume'].mean()
+        # NOUVEAU : Volatilité des prix (std)
+        volatility = window['close'].std()
+
+    # Features de base
     gap = abs(fvg['top'] - fvg['bot'])
-    bias = 1 if infer_bias(df.iloc[idx]) == 'bull' else (-1 if infer_bias(df.iloc[idx]) == 'bear' else 0)
+    bias_str = infer_bias(row)
+    bias = 1 if bias_str == 'bull' else (-1 if bias_str == 'bear' else 0)
     kz = 1 if in_kill_zone(now_paris()) else 0
-    x = np.array([gap, rng, vol, bias, kz], dtype=float).reshape(1,-1)
+
+    # NOUVELLES FEATURES
+    # 1. ATR normalisé (volatilité)
+    atr_val = row['atr'] if 'atr' in row and not pd.isna(row['atr']) else 0.0
+    atr_norm = atr_val / row['close'] if row['close'] > 0 else 0.0
+
+    # 2. Ratio FVG/ATR (qualité du FVG)
+    fvg_atr_ratio = gap / atr_val if atr_val > 0 else 0.0
+
+    # 3. Distance temporelle FVG-BOS (confluence)
+    bos_distance = fvg.get('bos_distance', 999)
+    bos_proximity = 1.0 / (bos_distance + 1)  # Plus proche = meilleur
+
+    # 4. Structure de marché
+    market_structure = row.get('market_structure', 'neutral')
+    structure_score = 1 if market_structure == 'bullish' and bias == 1 else (
+                     -1 if market_structure == 'bearish' and bias == -1 else 0)
+
+    # 5. Force du BOS
+    bos_strength = row.get('bos_strength', 0.0)
+    bos_strength_norm = bos_strength / atr_val if atr_val > 0 else 0.0
+
+    # 6. Position dans le FVG (proche du top/bot = meilleur)
+    px = row['close']
+    fvg_mid = fvg['mid']
+    position_in_fvg = abs(px - fvg_mid) / gap if gap > 0 else 0.5  # 0 = au milieu, 0.5 = aux bords
+
+    # 7. Momentum (variation sur 5 dernières barres)
+    if len(window) >= 5:
+        momentum = (row['close'] - window.iloc[-5]['close']) / window.iloc[-5]['close']
+    else:
+        momentum = 0.0
+
+    # Construire le vecteur de features (12 features au lieu de 5)
+    x = np.array([
+        gap,                 # 0: Taille du FVG
+        rng,                 # 1: Range du marché
+        vol,                 # 2: Volume
+        bias,                # 3: Biais (-1/0/1)
+        kz,                  # 4: Kill zone (0/1)
+        atr_norm,            # 5: ATR normalisé (volatilité)
+        fvg_atr_ratio,       # 6: Qualité du FVG
+        bos_proximity,       # 7: Proximité BOS-FVG
+        structure_score,     # 8: Cohérence structure
+        bos_strength_norm,   # 9: Force du BOS
+        position_in_fvg,     # 10: Position dans FVG
+        momentum             # 11: Momentum prix
+    ], dtype=float).reshape(1, -1)
+
     return x
 
 class MLFilter:
@@ -637,6 +829,7 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
         'max_trades_reached': 0,
         'atr_filtered': 0,
         'circuit_breaker_hit': 0,
+        'extreme_volatility_filtered': 0,  # NOUVEAU
         'entries': 0
     }
 
@@ -722,6 +915,15 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
             stats['cooldown_filtered'] += 1
             continue
 
+        # NOUVEAU : Filtre de volatilité extrême (évite les nouvelles lors de news)
+        if USE_EXTREME_VOLATILITY_FILTER and atrs is not None and i >= 50:
+            atr_val = atrs[i]
+            atr_window = atrs[max(0, i-50):i]
+            median_atr = np.median(atr_window[atr_window > 0])
+            if median_atr > 0 and atr_val > median_atr * VOLATILITY_MULTIPLIER_MAX:
+                stats['extreme_volatility_filtered'] += 1
+                continue
+
         if use_killzones:
             if TZ_OK:
                 t_pd = pd.Timestamp(t)
@@ -781,17 +983,31 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
         else:
             p = 0.5
 
-        # SL/TP basés sur swings
+        # SL/TP basés sur Order Blocks + swings (AMÉLIORÉ)
         entry = px
+        ob_side = df['ob_side'].values
+        ob_low = df['ob_low'].values
+        ob_high = df['ob_high'].values
+
         if side == 'buy':
             start = max(0, i - 60)
-            window_swing = swing_low[start:i]
-            window_lows = lows[start:i]
-            swing_indices = np.where(window_swing)[0]
-            if len(swing_indices) > 0:
-                sl = float(window_lows[swing_indices].min())
+
+            # NOUVEAU : Priorité aux Order Blocks bullish récents
+            ob_bull_indices = [j for j in range(start, i) if ob_side[j] == 'bull']
+            if len(ob_bull_indices) > 0:
+                # Utiliser le OB le plus récent comme SL
+                last_ob_idx = ob_bull_indices[-1]
+                sl = float(ob_low[last_ob_idx] - 2*pip)  # Juste en dessous du OB
             else:
-                sl = float(lo - 8*pip)
+                # Fallback sur swing lows
+                window_swing = swing_low[start:i]
+                window_lows = lows[start:i]
+                swing_indices = np.where(window_swing)[0]
+                if len(swing_indices) > 0:
+                    sl = float(window_lows[swing_indices].min())
+                else:
+                    sl = float(lo - 8*pip)
+
             dist = entry - sl
             if dist <= 2*pip:
                 stats['sl_too_close'] += 1
@@ -799,13 +1015,23 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
             tp = entry + session_rr * dist
         else:
             start = max(0, i - 60)
-            window_swing = swing_high[start:i]
-            window_highs = highs[start:i]
-            swing_indices = np.where(window_swing)[0]
-            if len(swing_indices) > 0:
-                sl = float(window_highs[swing_indices].max())
+
+            # NOUVEAU : Priorité aux Order Blocks bearish récents
+            ob_bear_indices = [j for j in range(start, i) if ob_side[j] == 'bear']
+            if len(ob_bear_indices) > 0:
+                # Utiliser le OB le plus récent comme SL
+                last_ob_idx = ob_bear_indices[-1]
+                sl = float(ob_high[last_ob_idx] + 2*pip)  # Juste au dessus du OB
             else:
-                sl = float(hi + 8*pip)
+                # Fallback sur swing highs
+                window_swing = swing_high[start:i]
+                window_highs = highs[start:i]
+                swing_indices = np.where(window_swing)[0]
+                if len(swing_indices) > 0:
+                    sl = float(window_highs[swing_indices].max())
+                else:
+                    sl = float(hi + 8*pip)
+
             dist = sl - entry
             if dist <= 2*pip:
                 stats['sl_too_close'] += 1
@@ -1141,18 +1367,47 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path=None):
             continue
 
         entry = df.at[i, 'close']
+        # AMÉLIORÉ : Utiliser Order Blocks pour SL (même logique que backtest)
         if side=='buy':
-            slice_df = df.iloc[max(0,i-60):i]
-            cands = slice_df[slice_df['swing_low']]
-            sl = float(cands['low'].min()) if len(cands) else float(df.at[i,'low'] - 8*pip)
+            start = max(0, i - 60)
+            slice_df = df.iloc[start:i]
+
+            # NOUVEAU : Priorité aux Order Blocks bullish
+            if USE_ORDER_BLOCK_SL:
+                ob_bull_indices = [j for j in range(start, i) if df.at[j, 'ob_side'] == 'bull']
+                if len(ob_bull_indices) > 0:
+                    last_ob_idx = ob_bull_indices[-1]
+                    sl = float(df.at[last_ob_idx, 'ob_low'] - 2*pip)
+                else:
+                    # Fallback sur swings
+                    cands = slice_df[slice_df['swing_low']]
+                    sl = float(cands['low'].min()) if len(cands) else float(df.at[i,'low'] - 8*pip)
+            else:
+                cands = slice_df[slice_df['swing_low']]
+                sl = float(cands['low'].min()) if len(cands) else float(df.at[i,'low'] - 8*pip)
+
             dist = entry - sl
             if dist <= 2*pip:
                 continue
             tp = entry + RR_TAKE_PROFIT * dist
         else:
-            slice_df = df.iloc[max(0,i-60):i]
-            cands = slice_df[slice_df['swing_high']]
-            sl = float(cands['high'].max()) if len(cands) else float(df.at[i,'high'] + 8*pip)
+            start = max(0, i - 60)
+            slice_df = df.iloc[start:i]
+
+            # NOUVEAU : Priorité aux Order Blocks bearish
+            if USE_ORDER_BLOCK_SL:
+                ob_bear_indices = [j for j in range(start, i) if df.at[j, 'ob_side'] == 'bear']
+                if len(ob_bear_indices) > 0:
+                    last_ob_idx = ob_bear_indices[-1]
+                    sl = float(df.at[last_ob_idx, 'ob_high'] + 2*pip)
+                else:
+                    # Fallback sur swings
+                    cands = slice_df[slice_df['swing_high']]
+                    sl = float(cands['high'].max()) if len(cands) else float(df.at[i,'high'] + 8*pip)
+            else:
+                cands = slice_df[slice_df['swing_high']]
+                sl = float(cands['high'].max()) if len(cands) else float(df.at[i,'high'] + 8*pip)
+
             dist = sl - entry
             if dist <= 2*pip:
                 continue

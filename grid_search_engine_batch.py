@@ -22,7 +22,8 @@ class SymbolInfoWrapper:
             setattr(self, key, value)
 
 
-# Parametres a tester
+# Parametres a tester - VERSION 2.0 avec nouveaux filtres ICT
+# Total: 3×4×3×3×4×2×2 = 1,728 combinaisons (nouveaux filtres ICT fixés à True)
 GRID_PARAMS = {
     'RISK_PER_TRADE': [0.005, 0.01, 0.02],
     'RR_TAKE_PROFIT': [1.5, 1.8, 2.0, 2.5],
@@ -31,6 +32,16 @@ GRID_PARAMS = {
     'ML_THRESHOLD': [0.3, 0.4, 0.5, 0.6],
     'USE_ATR_FILTER': [True, False],
     'USE_CIRCUIT_BREAKER': [True, False]
+}
+
+# Nouveaux filtres ICT v2.0 - TOUJOURS ACTIVÉS (valeurs recommandées)
+# Créer une variable séparée pour tests avancés si besoin
+GRID_PARAMS_ADVANCED = {
+    **GRID_PARAMS,
+    'USE_FVG_MITIGATION_FILTER': [True, False],
+    'USE_MARKET_STRUCTURE_FILTER': [True, False],
+    'USE_ORDER_BLOCK_SL': [True, False]
+    # Total: 1,728 × 2 × 2 × 2 = 13,824 combinaisons (optionnel, utiliser avec --advanced)
 }
 
 # Variable globale pour stocker les données partagées et le module
@@ -125,6 +136,14 @@ def run_single_backtest_batch(args: Tuple[int, Dict[str, Any]]) -> Dict[str, Any
         ict_bot.ML_THRESHOLD = params.get('ML_THRESHOLD', 0.5)
         ict_bot.USE_ATR_FILTER = params.get('USE_ATR_FILTER', False)
         ict_bot.USE_CIRCUIT_BREAKER = params.get('USE_CIRCUIT_BREAKER', False)
+
+        # NOUVEAUX : Appliquer les paramètres ICT v2.0
+        ict_bot.USE_FVG_MITIGATION_FILTER = params.get('USE_FVG_MITIGATION_FILTER', True)
+        ict_bot.USE_BOS_RECENCY_FILTER = True  # Toujours activé (pas dans grid search)
+        ict_bot.USE_MARKET_STRUCTURE_FILTER = params.get('USE_MARKET_STRUCTURE_FILTER', True)
+        ict_bot.BOS_MAX_AGE = 20  # Valeur fixe recommandée
+        ict_bot.FVG_BOS_MAX_DISTANCE = 20  # Valeur fixe recommandée
+        ict_bot.USE_ORDER_BLOCK_SL = params.get('USE_ORDER_BLOCK_SL', True)
 
         # Désactiver le ML pour plus de rapidité
         ict_bot.USE_ML_META_LABELLING = False
