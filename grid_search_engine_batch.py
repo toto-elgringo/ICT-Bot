@@ -34,6 +34,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 
 # Classe simple pour wrapper le dictionnaire info en objet
@@ -428,7 +429,7 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
             bars=bars,
             max_cache_age_hours=24,
             force_reload=False,
-            use_numba=True  # Utiliser Numba si disponible
+            use_numba=False  # IMPORTANT: Desactiver Numba car fvg_mitigated/market_structure manquants
         )
 
         # Convertir SymbolInfo en dictionnaire pour le rendre picklable
@@ -483,45 +484,65 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
 
     if max_workers == 1:
         # Mode sequentiel avec batch
-        print("[GRID SEARCH BATCH] Mode séquentiel avec batch processing")
+        print("[GRID SEARCH BATCH] Mode sequentiel avec batch processing")
 
         # Initialiser les données globales
         global _shared_df, _shared_info
         init_worker_batch(df, info_dict)
 
-        for batch in batches:
-            batch_results = run_batch_of_backtests(batch)
-            results.extend(batch_results)
-            completed += len(batch)
-
-            if callback:
-                callback(completed, total_tests)
-
-            if completed % 50 == 0 or completed == total_tests:
-                elapsed = time.time() - start_time
-                rate = completed / elapsed if elapsed > 0 else 0
-                remaining = (total_tests - completed) / rate if rate > 0 else 0
-                print(f"[GRID SEARCH BATCH] Progression: {completed}/{total_tests} "
-                      f"({rate:.1f} tests/s, reste ~{remaining/60:.1f} min)")
-
-    else:
-        # Mode parallele avec batch processing
-        print(f"[GRID SEARCH BATCH] Mode parallèle ({max_workers} workers)")
-
-        with mp.Pool(processes=max_workers, initializer=init_worker_batch, initargs=(df, info_dict)) as pool:
-            for batch_results in pool.imap_unordered(run_batch_of_backtests, batches, chunksize=1):
+        # Barre de progression avec tqdm
+        with tqdm(total=total_tests, desc="Grid Search", unit="test",
+                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+            for batch in batches:
+                batch_results = run_batch_of_backtests(batch)
                 results.extend(batch_results)
-                completed += len(batch_results)
+                completed += len(batch)
+
+                # Mise à jour de la barre
+                pbar.update(len(batch))
+
+                # Afficher les meilleurs résultats actuels dans la description
+                if results:
+                    best_result = max(results, key=lambda x: x.get('composite_score', 0))
+                    best_wr = best_result.get('win_rate', 0)
+                    best_trades = best_result.get('total_trades', 0)
+                    pbar.set_postfix({
+                        'Best_WR': f'{best_wr:.1f}%',
+                        'Best_Trades': best_trades,
+                        'Avg_time': f'{(time.time()-start_time)/completed:.2f}s/test' if completed > 0 else 'N/A'
+                    })
 
                 if callback:
                     callback(completed, total_tests)
 
-                if completed % 50 == 0 or completed == total_tests:
-                    elapsed = time.time() - start_time
-                    rate = completed / elapsed if elapsed > 0 else 0
-                    remaining = (total_tests - completed) / rate if rate > 0 else 0
-                    print(f"[GRID SEARCH BATCH] Progression: {completed}/{total_tests} "
-                          f"({rate:.1f} tests/s, reste ~{remaining/60:.1f} min)")
+    else:
+        # Mode parallele avec batch processing
+        print(f"[GRID SEARCH BATCH] Mode parallele ({max_workers} workers)")
+
+        # Barre de progression avec tqdm pour mode parallèle
+        with tqdm(total=total_tests, desc="Grid Search (parallel)", unit="test",
+                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+            with mp.Pool(processes=max_workers, initializer=init_worker_batch, initargs=(df, info_dict)) as pool:
+                for batch_results in pool.imap_unordered(run_batch_of_backtests, batches, chunksize=1):
+                    results.extend(batch_results)
+                    completed += len(batch_results)
+
+                    # Mise à jour de la barre
+                    pbar.update(len(batch_results))
+
+                    # Afficher les meilleurs résultats actuels
+                    if results:
+                        best_result = max(results, key=lambda x: x.get('composite_score', 0))
+                        best_wr = best_result.get('win_rate', 0)
+                        best_trades = best_result.get('total_trades', 0)
+                        pbar.set_postfix({
+                            'Best_WR': f'{best_wr:.1f}%',
+                            'Best_Trades': best_trades,
+                            'Avg_time': f'{(time.time()-start_time)/completed:.2f}s/test' if completed > 0 else 'N/A'
+                        })
+
+                    if callback:
+                        callback(completed, total_tests)
 
     # Trier par score composite
     results.sort(key=lambda x: x['composite_score'], reverse=True)
@@ -615,25 +636,36 @@ def main():
     timeframe = sys.argv[2]
     bars = int(sys.argv[3])
 
-    # Arguments positionnels optionnels
-    pos_args = [arg for arg in sys.argv[4:] if not arg.startswith('--')]
-    workers = int(pos_args[0]) if len(pos_args) > 0 else None
-    batch_size = int(pos_args[1]) if len(pos_args) > 1 else 10
-
-    # Arguments nommés optionnels
+    # Arguments nommés optionnels (parser AVANT positionnels pour exclure leurs valeurs)
     grid_mode = 'standard'
     use_early_stopping = False
 
+    # Indices à exclure des arguments positionnels
+    excluded_indices = set()
+
     if '--grid' in sys.argv:
         grid_idx = sys.argv.index('--grid')
+        excluded_indices.add(grid_idx)
         if grid_idx + 1 < len(sys.argv):
+            excluded_indices.add(grid_idx + 1)
             grid_mode = sys.argv[grid_idx + 1]
             if grid_mode not in ['fast', 'standard', 'advanced']:
                 print(f"[ERROR] Invalid grid mode: {grid_mode}. Use fast/standard/advanced")
                 sys.exit(1)
 
     if '--early-stop' in sys.argv:
+        early_stop_idx = sys.argv.index('--early-stop')
+        excluded_indices.add(early_stop_idx)
         use_early_stopping = True
+
+    # Arguments positionnels optionnels (exclure les flags nommés ET leurs valeurs)
+    pos_args = []
+    for i, arg in enumerate(sys.argv[4:], start=4):
+        if not arg.startswith('--') and i not in excluded_indices:
+            pos_args.append(arg)
+
+    workers = int(pos_args[0]) if len(pos_args) > 0 else None
+    batch_size = int(pos_args[1]) if len(pos_args) > 1 else 10
 
     # Lancer le grid search BATCH v2.1.1
     results = run_grid_search_batch(
