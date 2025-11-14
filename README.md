@@ -1,10 +1,9 @@
-# 🤖 ICT Trading Bot
+# 🤖 ICT Trading Bot v2.1
 
 Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader)** avec filtrage par **Machine Learning** et notifications **Telegram** en temps réel.
 
 ## 📋 Table des matières
 
-- [🚀 Quick Start](#-quick-start-5-minutes)
 - [Fonctionnalités](#-fonctionnalités)
 - [Prérequis](#-prérequis)
 - [Installation](#-installation)
@@ -14,74 +13,56 @@ Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader
 - [Démarrage](#-démarrage)
 - [Utilisation](#-utilisation)
 - [Grid Testing](#-grid-testing---optimisation-automatique)
-- [Changelog v2.1.1](#-changelog-v211)
 - [Structure du Projet](#-structure-du-projet)
 - [Troubleshooting](#-troubleshooting)
 - [Sécurité](#-sécurité)
 
 ---
 
-## 🚀 Quick Start (5 minutes)
+## 📝 Changelog v2.1 (13 Novembre 2025)
 
-**Démarrage rapide** pour les utilisateurs expérimentés. [Guide complet ici](#-installation).
+### Améliorations Stratégie ICT
+- ✅ **Validation de récence BOS**: Seuls les BOS des 20 dernières barres sont valides
+- ✅ **Tracking de mitigation FVG**: Ignore les FVGs déjà touchés par le prix
+- ✅ **Détection de structure de marché**: HH/HL (bullish) ou LL/LH (bearish)
+- ✅ **Confluence temporelle stricte**: FVG et BOS doivent être à < 20 barres
+- ✅ **Order Blocks pour Stop Loss**: Meilleure protection que les swing points
+- ✅ **Filtre de volatilité extrême**: Ignore les trades si ATR > 3× médiane (protection news)
 
-### 1. Installation Express
-```bash
-# Cloner le projet
-git clone https://github.com/votre-repo/ICT-Bot.git && cd ICT-Bot
+### Améliorations Machine Learning
+- ✅ **12 features ML** (vs 5 en v1.0):
+  - Contexte marché: gap, range, vol, bias, kz
+  - Technique: atr_norm, fvg_atr_ratio, bos_proximity, momentum
+  - Structure: structure_score, bos_strength_norm, position_in_fvg
+- ✅ **Breaking Change**: Modèles v1.0 incompatibles - supprimer les .pkl existants
 
-# Installer dépendances
-pip install MetaTrader5 scikit-learn numpy pandas matplotlib pytz requests streamlit plotly joblib numba llvmlite
-```
+### Améliorations Grid Search
+- ✅ **Mode ADVANCED**: 27,648 combinaisons (vs 1,728 en standard)
+- ✅ **3 nouveaux paramètres testés**: BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, VOLATILITY_MULTIPLIER_MAX
 
-### 2. Configuration MT5 (1 min)
-Créer `mt5_credentials.json` :
-```json
-{
-  "login": 123456,
-  "password": "VotreMotDePasse",
-  "server": "NomDuServeur"
-}
-```
-
-### 3. Lancer l'Interface (30 sec)
-```bash
-streamlit run streamlit_bot_manager.py
-```
-→ Interface web ouvre sur `http://localhost:8501`
-
-### 4. Premier Backtest (2 min)
-Dans l'interface :
-1. **Tab 3 - Backtest**
-2. Sélectionner **Default.json** (configuration équilibrée ⭐)
-3. Symbol: `EURUSD`, Timeframe: `H1`, Bars: `5000`
-4. Cliquer **"🚀 Lancer Backtest"**
-
-**Résultat attendu** : 150-200 trades, 58-62% win rate
-
-### 5. Optimisation (Optionnel - 5-7 min)
-```bash
-# Grid Search mode STANDARD (recommandé)
-python grid_search_engine_batch.py EURUSD H1 5000 --grid standard
-```
-
-**⚠️ IMPORTANT** :
-- Utilisez **H1** ou **H4** (PAS M5 avec > 10k barres → risque crash)
-- Configuration **Default.json** recommandée pour débuter
-- Testez en **DEMO** avant LIVE
-
-[→ Guide détaillé](#-installation) | [→ Troubleshooting](#-troubleshooting)
+### Performances Attendues
+- 📈 **Win Rate**: +10% (53.5% → 59-63%)
+- 📉 **Max Drawdown**: -7% (-14.88% → -8-10%)
+- 🎯 **Qualité**: -35% de trades mais meilleure qualité
 
 ---
 
 ## ✨ Fonctionnalités
 
-- ✅ **Stratégie ICT** : Fair Value Gaps (FVG), Break of Structure (BOS), Order Blocks (OB), Kill Zones
-- ✅ **Machine Learning** : Meta-labelling avec Logistic Regression pour filtrer les trades (modèle individuel par bot)
+- ✅ **Stratégie ICT v2.1** : Fair Value Gaps (FVG), Break of Structure (BOS), Order Blocks (OB), Kill Zones
+  - ⭐ **NOUVEAU**: Validation temporelle stricte (FVG + BOS < 20 barres)
+  - ⭐ **NOUVEAU**: Détection de structure de marché (HH/HL bullish, LL/LH bearish)
+  - ⭐ **NOUVEAU**: Tracking de mitigation FVG (ignore les FVGs déjà touchés)
+  - ⭐ **NOUVEAU**: Filtre de volatilité extrême (protection contre les news)
+  - ⭐ **NOUVEAU**: Order Blocks pour Stop Loss (meilleure protection)
+- ✅ **Machine Learning v2.1** : Meta-labelling avec 12 features (vs 5 en v1.0)
+  - ⭐ **NOUVEAU**: Features de structure (structure_score, bos_strength_norm, position_in_fvg)
+  - ⭐ **NOUVEAU**: Features techniques (atr_norm, fvg_atr_ratio, bos_proximity, momentum)
+  - Modèle individuel par bot avec rolling window anti-overfitting
 - ✅ **Gestion Multi-Bot** : Gérez plusieurs bots simultanément avec des configurations différentes
 - ✅ **Dashboard Streamlit** : Interface web complète pour contrôler tous vos bots
 - ✅ **Configurations Nommées** : Créez et gérez plusieurs stratégies (Default, Aggressive, Conservative, etc.)
-- ✅ **Grid Testing v2.1.1** : 3 modes d'optimisation (Fast: 864 / Standard: 2,592 / Advanced: 20,736 combinaisons)
+- ✅ **Grid Testing** : Mode Standard (1,728 tests) ou Advanced (27,648 tests avec paramètres v2.1)
 - ✅ **Notifications Telegram** : Alertes en temps réel lors de l'ouverture de positions
 - ✅ **Backtesting** : Testez vos stratégies sur des données historiques
 - ✅ **Risk Management** : Circuit breaker, risque adaptatif, sessions adaptatives
@@ -333,15 +314,13 @@ python ict_bot_all_in_one.py --mode live --symbol EURUSD --timeframe M5
   - Sélection multiple
   - Tableau comparatif : Trades | Win Rate (%) | PnL ($) | Max DD (%)
 
-#### 🔬 Onglet "Grid Testing v2.1.1"
-- **3 modes d'optimisation** : Fast (864) / Standard (2,592) / Advanced (20,736) combinaisons
-- **Presets ICT** : Conservative / Default / Aggressive pour screening rapide
-- **8 nouveaux paramètres ICT** : FVG Mitigation, Market Structure, BOS Age, Volatility Filter, etc.
-- **Early Stopping** : Skip automatique des combinaisons sous-performantes (optionnel)
-- **Multiprocessing** : 1-4 workers pour accélérer les tests (25-35x vs séquentiel)
-- **Score composite** : 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)
-- **Sauvegarde automatique** du top 5 dans `Grid/` avec métadonnées enrichies
-- **Création de configs** à partir des meilleurs résultats
+#### 🔬 Onglet "Grid Testing"
+- **Optimisation automatique** de 1,728 combinaisons de paramètres
+- Teste 7 paramètres : Risk, RR, Max Trades, Cooldown, ML Threshold, ATR Filter, Circuit Breaker
+- Multiprocessing pour accélérer les tests (1-4 workers)
+- Score composite : 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)
+- Sauvegarde automatique du top 5 dans `Grid/`
+- Création de nouvelles configurations à partir des meilleurs résultats
 - **Voir section dédiée** ci-dessous pour le guide complet
 
 ---
@@ -366,16 +345,11 @@ Quand un bot ouvre une position, vous recevez :
 
 ---
 
-## 🔬 Grid Testing v2.1.1 - Optimisation Automatique
+## 🔬 Grid Testing - Optimisation Automatique
 
-### 🎯 Qu'est-ce que le Grid Testing v2.1.1?
+### 🎯 Qu'est-ce que le Grid Testing?
 
-Le Grid Testing v2.1.1 propose **3 modes d'optimisation progressifs** :
-- **FAST** : 864 combinaisons (2-3 min) - Screening avec presets ICT
-- **STANDARD** : 2,592 combinaisons (5-7 min) - Fine-tuning des filtres clés
-- **ADVANCED** : 20,736 combinaisons (15-20 min) - Exploration exhaustive
-
-Nouveauté v2.1.1 : Support des 8 paramètres ICT configurables (FVG Mitigation, Market Structure, BOS Age, Volatility Filter, etc.)
+Le Grid Testing teste **automatiquement 1,728 combinaisons** de paramètres pour trouver la configuration optimale de votre bot ICT.
 
 ### ⚠️ IMPORTANT: Kill Zones et Nombre de Barres
 
@@ -503,49 +477,23 @@ Grid/
 
 ### ❓ FAQ Grid Testing
 
-**Q: ⚠️ Pourquoi Grid Testing crash/produit 0 trades?**
-R: **ERREUR COURANTE** : M5 avec 100,000 barres = crash garanti !
-- ❌ **Ne PAS utiliser** : `M5 + > 10,000 barres`
-- ✅ **Utiliser** : `H1 avec 3,000-5,000 barres` OU `H4 avec 1,500-2,000 barres`
-- **Raison** : Kill Zones (6h/24h) + M5 = trop de données inutiles
-
-**Q: Grid Testing termine en 5 secondes avec 0 résultats?**
-R: Le programme a crashé **avant** le premier test. Causes:
-1. **M5 + trop de barres** → Timeout chargement MT5 (99% des cas)
-2. MT5 non connecté
-3. Mémoire insuffisante
-**Solution** : Utiliser H1 avec 3,000-5,000 barres
-
-**Q: Quel timeframe choisir?**
-R: **H1** (⭐ recommandé) ou **H4** sont optimaux.
-- M5 : Trop de données, risque crash
-- H1 : Équilibre parfait (4-7 mois de données)
-- H4 : Très rapide (6-11 mois de données)
-
-**Q: Combien de barres utiliser?**
-R: Dépend du timeframe :
-- **M5** : 10,000-20,000 barres (⚠️ risque crash si Grid Search)
-- **H1** : 3,000-5,000 barres ⭐ (recommandé)
-- **H4** : 1,500-2,000 barres ⭐ (très rapide)
+**Q: Pourquoi j'ai 0 trades avec M5?**
+R: Pas assez de barres. M5 nécessite 10,000-20,000 barres minimum.
 
 **Q: Mon PC crash, que faire?**
-R: Réduire la charge :
-1. **Changer timeframe** : M5 → H1 ou H4
-2. **Réduire barres** : 100k → 5k
-3. Utiliser 1 worker au lieu de 2
-4. Fermer Chrome, PyCharm, etc.
+R: Utilisez 1 worker uniquement, fermez les autres apps, réduisez le nombre de barres.
+
+**Q: Quel timeframe choisir?**
+R: H1 ou H4 sont recommandés. Plus rapide et moins gourmand que M5.
 
 **Q: Combien de temps ça prend?**
-R: Avec mode v2.1.1 :
-- **FAST** : 2-3 min (864 combinaisons)
-- **STANDARD** : 5-7 min (2,592 combinaisons) ⭐
-- **ADVANCED** : 15-20 min (20,736 combinaisons)
+R: 2-4 heures avec 1 worker selon le nombre de barres.
 
 **Q: Puis-je arrêter et reprendre?**
 R: Non, le grid search doit tourner en continu. Mais vous pouvez utiliser votre PC normalement pendant (évitez juste les tâches lourdes).
 
 **Q: Les résultats sont-ils fiables?**
-R: Plus vous utilisez de barres (données historiques), plus les résultats sont fiables. Minimum recommandé: 3-6 mois de données (H1 = 3,000+ barres, H4 = 1,500+ barres).
+R: Plus vous utilisez de barres (données historiques), plus les résultats sont fiables. Minimum recommandé: 3-6 mois de données.
 
 ### 🚨 Troubleshooting Grid Testing
 
@@ -625,25 +573,16 @@ streamlit run streamlit_bot_manager.py
 ```
 L'interface utilise automatiquement la version optimisée (25-35x speedup).
 
-**Via ligne de commande v2.1.1**:
+**Via ligne de commande**:
 ```bash
-# Mode FAST - Screening rapide (2-3 min)
-python grid_search_engine_batch.py EURUSD H1 5000 --grid fast
-
-# Mode STANDARD - Recommandé (5-7 min)
-python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid standard
-
-# Mode ADVANCED - Exhaustif (15-20 min)
-python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid advanced --early-stop
+python grid_search_engine_batch.py EURUSD H1 2000 2 10
 
 # Arguments:
 # - EURUSD: symbole
 # - H1: timeframe
-# - 5000: nombre de barres (3000-5000 pour H1, 1500-2000 pour H4)
-# - 2: workers (optionnel, 2 recommandé)
-# - 10: batch_size (optionnel, 10 par défaut)
-# - --grid MODE: fast/standard/advanced (défaut: standard)
-# - --early-stop: Skip automatique des mauvaises combinaisons
+# - 2000: nombre de barres
+# - 2: workers (optionnel, défaut: auto-détecté)
+# - 10: batch_size (optionnel, défaut: 10)
 ```
 
 ### 🔧 Gestion du Cache MT5
@@ -943,91 +882,6 @@ pip install --upgrade MetaTrader5 scikit-learn numpy pandas matplotlib pytz requ
 
 ---
 
-## 📝 Changelog v2.1.1
-
-### 🎯 Version 2.1.1 (13 Nov 2025) - Correctif Filtres + Grid Search Multi-Mode
-
-#### 🐛 Bugs Critiques Corrigés
-
-**Problème**: Les 8 paramètres v2.1 existaient dans les configs MAIS étaient **hardcodés** dans le code → impossible de les désactiver → Résultat: **8 trades en 489 jours** (trop restrictif)
-
-**4 Corrections Appliquées**:
-1. **`infer_bias()`** : Vérification du flag `USE_MARKET_STRUCTURE_FILTER` (mode strict vs permissif)
-2. **`detect_bos()`** : Vérification du flag `USE_BOS_RECENCY_FILTER` + variable `BOS_MAX_AGE`
-3. **`latest_fvg_confluence_row()`** : 3 hardcodes remplacés par variables config
-4. **Backtest JSON** : Sauvegarde des 8 paramètres v2.1 dans les résultats
-
-#### ✨ Nouvelles Fonctionnalités
-
-**3 Presets Préoptimisés** (`config/`):
-- **Conservative.json** : Ultra-strict (50-80 trades, 65-75% WR) - Compte réel
-- **Default.json** ⭐ : Équilibré (150-200 trades, 58-62% WR) - Production
-- **Aggressive.json** : Scalping (300-400 trades, 52-56% WR) - DEMO
-
-**Grid Search 3 Modes** (`grid_search_engine_batch.py`):
-- **FAST** : 864 combinaisons (2-3 min) - Screening via presets
-- **STANDARD** ⭐ : 2,592 combinaisons (5-7 min) - Production
-- **ADVANCED** : 20,736 combinaisons (15-20 min) - R&D exhaustif
-
-**Early Stopping** (mode ADVANCED):
-- Skip automatique des combinaisons non-viables (WR < 45%)
-- Gain : 10-15% de temps
-
-**Interface Streamlit Multi-Mode** (`streamlit_bot_manager.py`):
-- Tab 2 : Section "Presets Rapides" avec chargement 1-clic
-- Tab 3 : Sélecteur preset avec indicateurs visuels
-- Tab 5 : Grid Testing refonte complète (sélecteur FAST/STANDARD/ADVANCED)
-- Sidebar : Version v2.1.1 + liste features
-
-**Nouvelle CLI** :
-```bash
-# Mode FAST
-python grid_search_engine_batch.py EURUSD H1 5000 --grid fast
-
-# Mode STANDARD (recommandé)
-python grid_search_engine_batch.py EURUSD H1 5000 --grid standard
-
-# Mode ADVANCED avec early stopping
-python grid_search_engine_batch.py EURUSD H1 5000 --grid advanced --early-stop
-```
-
-#### 📊 Améliorations Performance
-
-| Métrique | Avant v2.1.1 | Après v2.1.1 (Default) | Amélioration |
-|----------|--------------|------------------------|--------------|
-| **Trades (489j)** | 8 | 150-200 | **+18-24x** |
-| **Win Rate** | 100% (8 trades) | 58-62% | Plus réaliste |
-| **Configurabilité** | ❌ Hardcodé | ✅ 8 params | 100% flexible |
-| **Grid Search** | 1 mode | 3 modes | FAST/STD/ADV |
-
-#### ⚠️ Breaking Changes
-
-1. **Default.json remplacé** : Ancienne version (ultra-strict) → `Conservative.json`, nouvelle version (équilibrée) → `Default.json`
-2. **Grid Search CLI** : Argument `--grid {fast|standard|advanced}` maintenant obligatoire
-3. **ML Models** : v2.0 (5 features) incompatibles avec v2.1 (12 features) → Supprimer `.pkl` files
-
-#### 🔧 Migration
-
-```bash
-# 1. Supprimer anciens modèles ML
-rm machineLearning/*.pkl  # Linux/Mac
-del machineLearning\*.pkl  # Windows
-
-# 2. Tester nouvelle config Default
-python ict_bot_all_in_one.py --mode backtest --symbol EURUSD --timeframe H1 --bars 5000 --config-name Default
-
-# 3. Grid Search mode STANDARD
-python grid_search_engine_batch.py EURUSD H1 5000 --grid standard
-```
-
-#### 📚 Documentation
-
-- Nettoyage : 7 fichiers .md temporaires supprimés
-- Quick Start : Guide 5 minutes ajouté
-- FAQ Grid Testing : Avertissements M5 + barres élevées
-
----
-
 ## 🔒 Sécurité
 
 ### ⚠️ IMPORTANT - Protégez vos credentials !
@@ -1193,8 +1047,8 @@ Ce projet est fourni "tel quel" sans garantie. Utilisez-le à vos propres risque
 
 ---
 
-**Version** : 3.2.1 - Multi-Bot Edition avec Grid Testing v2.1.1 (3 modes progressifs)
-**Dernière mise à jour** : 13 Novembre 2025
-**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & Ultra-Fast Grid Testing v2.1.1
+**Version** : 2.1 - Enhanced ICT Strategy avec 12 ML Features
+**Dernière mise à jour** : 14 Novembre 2025
+**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & v2.1 Strategy Enhancements
 
 🤖 **Happy Trading!**

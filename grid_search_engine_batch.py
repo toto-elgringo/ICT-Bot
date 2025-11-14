@@ -1,35 +1,42 @@
 """
-Grid Search Engine v2.1.1 avec BATCH PROCESSING
-
-VERSION 2.1.1 FEATURES:
-- 4 grilles progressives pour optimisation graduée:
-  * FAST: 864 combinaisons (~2-3 min) - Screening avec presets
-  * STANDARD: 2,592 combinaisons (~5-7 min) - Fine-tuning des filtres clés
-  * ADVANCED: 20,736 combinaisons (~15-20 min) - Exploration exhaustive
-  * COMPLETE: 27,648 combinaisons (~25-30 min) - TOUS les paramètres individuels
-- Support des 8 nouveaux paramètres ICT configurables
-- Système de presets (Conservative/Default/Aggressive)
-- Early stopping optionnel pour skip les configurations médiocres
-- Métadonnées enrichies dans les résultats JSON
+Grid Search Engine avec BATCH PROCESSING - v2.0 Enhanced
+=====================================================
 
 OPTIMISATIONS:
-1. Shared Memory: Données MT5 chargées une fois, partagées entre workers
-2. Disk Cache: Cache MT5 persistant (100ms vs 3-5s)
-3. Numba JIT: Indicateurs compilés en machine code (3-5x faster)
-4. Batch Processing: 10 configs par worker sans overhead de création/destruction
-5. Early Stopping: Skip automatique des combinaisons sous-performantes
+- Batch processing: Traite plusieurs configurations par worker (1.5-2x speedup)
+- Shared memory: Charge les données MT5 une seule fois
+- Disk cache: Sauvegarde/charge les données MT5 depuis le disque
+- Numba JIT: Compilation des indicateurs en code machine
 
-Speedup total: 25-35x vs version originale séquentielle
+MODES:
+- standard: v1.0 parameters, 1,728 tests (~4-6 minutes)
+  Tests: RISK, RR, MAX_TRADES, COOLDOWN, ML_THRESHOLD, ATR_FILTER, CIRCUIT_BREAKER
 
-Usage:
-    python grid_search_engine_batch.py EURUSD H1 5000 --grid fast
-    python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid standard
-    python grid_search_engine_batch.py XAUUSD H4 2000 2 10 --grid advanced --early-stop
-    python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid complete
+- advanced: v2.0 enhanced, 46,656 tests (~2-3 hours)
+  Includes all standard params PLUS:
+  - BOS_MAX_AGE: [15, 20, 30] bars
+  - FVG_BOS_MAX_DISTANCE: [15, 20, 30] bars
+  - VOLATILITY_MULTIPLIER_MAX: [2.5, 3.0, 4.0]
+
+v2.0 BOOLEAN FILTERS (always enabled in both modes):
+  - USE_BOS_RECENCY_FILTER = True
+  - USE_FVG_MITIGATION_FILTER = True
+  - USE_MARKET_STRUCTURE_FILTER = True
+  - USE_ORDER_BLOCK_SL = True
+  - USE_EXTREME_VOLATILITY_FILTER = True
+
+USAGE:
+  Standard mode (fast):
+    python grid_search_engine_batch.py EURUSD H1 2000
+
+  Advanced mode (comprehensive):
+    python grid_search_engine_batch.py EURUSD H1 2000 --mode advanced
+
+  With custom workers and batch size:
+    python grid_search_engine_batch.py EURUSD H1 2000 2 10 --mode advanced
 """
 
 import os
-import sys
 import json
 import itertools
 import multiprocessing as mp
@@ -37,14 +44,6 @@ from datetime import datetime
 from typing import List, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
-
-# Initialiser colorama pour Windows (fix affichage tqdm)
-try:
-    import colorama
-    colorama.init()
-except ImportError:
-    pass  # Colorama optionnel (Linux/Mac n'en ont pas besoin)
 
 
 # Classe simple pour wrapper le dictionnaire info en objet
@@ -55,87 +54,49 @@ class SymbolInfoWrapper:
             setattr(self, key, value)
 
 
-# ============================================================================
-# GRID SEARCH v2.1.1 - 3 PROGRESSIVE GRIDS
-# ============================================================================
-# VERSION 2.1.1: 8 nouveaux paramètres ICT configurables
-# Optimisation: 3 grilles progressives pour éviter explosion combinatoire
-
-# GRID_PARAMS_FAST - Screening rapide (2-3 minutes)
-# Total: 2×3×3×2×4×1×2×3 = 864 combinaisons
-GRID_PARAMS_FAST = {
-    'RISK_PER_TRADE': [0.01, 0.02],
-    'RR_TAKE_PROFIT': [1.5, 1.8, 2.0],
-    'ML_THRESHOLD': [0.35, 0.40, 0.45],
-    'MAX_CONCURRENT_TRADES': [2, 3],
-    'COOLDOWN_BARS': [3, 5, 7, 10],
-    'USE_ATR_FILTER': [True],  # Toujours activé en mode Fast
-    'USE_ADAPTIVE_RISK': [True, False],
-    # v2.1.1: Utiliser PRESETS au lieu de tester individuellement
-    'FILTER_PRESET': ['Conservative', 'Default', 'Aggressive']
-}
-
-# GRID_PARAMS - Standard (5-7 minutes)
-# Total: 3×4×3×2×3×1×2×2×2×2×2 = 2,592 combinaisons
+# Parametres a tester - STANDARD MODE (v1.0 compatible)
+# Total: 3 × 4 × 3 × 3 × 4 × 2 × 2 = 1,728 tests
+# Runtime: ~4-6 minutes with 2 workers
 GRID_PARAMS = {
     'RISK_PER_TRADE': [0.005, 0.01, 0.02],
-    'RR_TAKE_PROFIT': [1.3, 1.5, 1.8, 2.0],
-    'ML_THRESHOLD': [0.35, 0.40, 0.45],
-    'MAX_CONCURRENT_TRADES': [2, 3],
-    'COOLDOWN_BARS': [3, 5, 7],
-    'USE_ATR_FILTER': [True],
-    'USE_ADAPTIVE_RISK': [True, False],
-    # v2.1.1: Fine-tuning des filtres clés
-    'USE_FVG_MITIGATION_FILTER': [True, False],
-    'USE_MARKET_STRUCTURE_FILTER': [True, False],
-    'BOS_MAX_AGE': [20, 30],
-    'FVG_BOS_MAX_DISTANCE': [20, 30]
-}
-
-# GRID_PARAMS_ADVANCED - Exploration exhaustive (15-20 minutes)
-# Total: 4×5×4×3×3×2×2×2×2×2×3×3×2×2 = 20,736 combinaisons
-GRID_PARAMS_ADVANCED = {
-    'RISK_PER_TRADE': [0.005, 0.01, 0.015, 0.02],
-    'RR_TAKE_PROFIT': [1.2, 1.5, 1.8, 2.0, 2.5],
-    'ML_THRESHOLD': [0.30, 0.35, 0.40, 0.45],
-    'MAX_CONCURRENT_TRADES': [2, 3, 4],
-    'COOLDOWN_BARS': [3, 5, 7],
+    'RR_TAKE_PROFIT': [1.5, 1.8, 2.0, 2.5],
+    'MAX_CONCURRENT_TRADES': [1, 2, 3],
+    'COOLDOWN_BARS': [3, 5, 8],
+    'ML_THRESHOLD': [0.3, 0.4, 0.5, 0.6],
     'USE_ATR_FILTER': [True, False],
-    'USE_ADAPTIVE_RISK': [True, False],
-    # v2.1.1: Exploration complète des 8 paramètres
-    'USE_FVG_MITIGATION_FILTER': [True, False],
-    'USE_BOS_RECENCY_FILTER': [True, False],
-    'USE_MARKET_STRUCTURE_FILTER': [True, False],
-    'BOS_MAX_AGE': [20, 30, 40],
-    'FVG_BOS_MAX_DISTANCE': [20, 30, 40],
-    'USE_EXTREME_VOLATILITY_FILTER': [True, False],
-    'VOLATILITY_MULTIPLIER_MAX': [3.0, 4.0]
+    'USE_CIRCUIT_BREAKER': [True, False]
 }
 
-# GRID_PARAMS_COMPLETE : 27,648 combinaisons (~25-30 min avec 2 workers)
-# Teste TOUS les 15 paramètres (7 base + 8 ICT v2.1.1) individuellement
-# Aucun preset : Configuration complète dans résultats JSON
-GRID_PARAMS_COMPLETE = {
-    # Paramètres de base (7 params) : 3×4×3×2×3×1×2 = 432 combinaisons
-    'RISK_PER_TRADE': [0.01, 0.015, 0.02],  # Risque par trade
-    'RR_TAKE_PROFIT': [1.5, 1.8, 2.0, 2.5],  # Risk/Reward ratio
-    'ML_THRESHOLD': [0.35, 0.40, 0.45],  # Seuil ML (0.30 trop agressif, 0.50 trop strict)
-    'MAX_CONCURRENT_TRADES': [2, 3],  # Max trades simultanés (1 trop prudent, 4+ trop risqué)
-    'COOLDOWN_BARS': [3, 5, 7],  # Cooldown entre trades (10 trop long)
-    'USE_ATR_FILTER': [True],  # FIXÉ : Filtre ATR essentiel
-    'USE_ADAPTIVE_RISK': [True, False],  # Risque adaptatif après pertes
+# Parametres a tester - ADVANCED MODE (v2.0 with ICT enhancements)
+# Total: 1,728 × 3 × 3 × 3 = 46,656 tests (REDUCED to 27,648 by removing one RR value)
+# Runtime: ~2-3 hours with 2 workers
+GRID_PARAMS_ADVANCED = {
+    # Core parameters (same as GRID_PARAMS)
+    'RISK_PER_TRADE': [0.005, 0.01, 0.02],
+    'RR_TAKE_PROFIT': [1.5, 1.8, 2.0, 2.5],
+    'MAX_CONCURRENT_TRADES': [1, 2, 3],
+    'COOLDOWN_BARS': [3, 5, 8],
+    'ML_THRESHOLD': [0.3, 0.4, 0.5, 0.6],
+    'USE_ATR_FILTER': [True, False],
+    'USE_CIRCUIT_BREAKER': [True, False],
 
-    # Paramètres ICT v2.1.1 (8 params) : 2×2×2×2×2×1×2×1 = 64 combinaisons
-    'USE_FVG_MITIGATION_FILTER': [True, False],  # Ignorer FVG déjà mitigés
-    'USE_BOS_RECENCY_FILTER': [True, False],  # BOS doit être récent (< BOS_MAX_AGE)
-    'USE_MARKET_STRUCTURE_FILTER': [True, False],  # Structure HH/HL ou LL/LH requise
-    'BOS_MAX_AGE': [20, 30],  # Age max du BOS en barres (15 trop strict, 40 trop permissif)
-    'FVG_BOS_MAX_DISTANCE': [20, 30],  # Distance max FVG-BOS en barres
-    'USE_ORDER_BLOCK_SL': [True],  # FIXÉ : OB pour SL = amélioration majeure
-    'USE_EXTREME_VOLATILITY_FILTER': [True, False],  # Filtrer volatilité extrême (news)
-    'VOLATILITY_MULTIPLIER_MAX': [3.0],  # FIXÉ : Seuil volatilité (défaut recommandé)
+    # v2.0 ICT Strategy Enhancements (NEW)
+    # These parameters control the quality vs quantity tradeoff
+    'BOS_MAX_AGE': [15, 20, 30],  # How recent must BOS be? (bars)
+    'FVG_BOS_MAX_DISTANCE': [15, 20, 30],  # Max distance between FVG and BOS (bars)
+    'VOLATILITY_MULTIPLIER_MAX': [2.5, 3.0, 4.0]  # Volatility filter threshold (ATR multiplier)
 }
-# TOTAL : 432 × 64 = 27,648 combinaisons
+
+# v2.0 Boolean filters - These are always enabled in advanced mode with their defaults
+# Testing all combinations would create 1.5M tests (infeasible)
+# Instead, we keep these enabled and only test the numeric thresholds above
+V20_BOOLEAN_DEFAULTS = {
+    'USE_BOS_RECENCY_FILTER': True,
+    'USE_FVG_MITIGATION_FILTER': True,
+    'USE_MARKET_STRUCTURE_FILTER': True,
+    'USE_ORDER_BLOCK_SL': True,
+    'USE_EXTREME_VOLATILITY_FILTER': True
+}
 
 # Variable globale pour stocker les données partagées et le module
 _shared_df = None
@@ -143,80 +104,46 @@ _shared_info = None
 _ict_bot_module = None
 
 
-def apply_filter_preset(ict_bot, preset_name: str):
+def get_grid_params(mode: str = 'standard') -> Dict[str, List[Any]]:
     """
-    Applique un preset de filtres ICT v2.1.1
+    Returns grid parameters based on mode
 
     Args:
-        ict_bot: Module ict_bot_all_in_one chargé
-        preset_name: 'Conservative', 'Default', ou 'Aggressive'
+        mode: 'standard' (1,728 tests, 4-6 min) or 'advanced' (46,656 tests, 2-3h)
+              or 'complete' (all v2.0 combinations)
+
+    Returns:
+        dict: Grid parameters dictionary
+
+    Mode Details:
+        - 'standard': v1.0 compatible, 7 parameters, 1,728 tests (~4-6 min)
+        - 'advanced': v2.0 enhanced, 10 parameters, 46,656 tests (~2-3 hours)
+        - 'complete': Same as advanced (kept for compatibility)
     """
-    if preset_name == 'Conservative':
-        # Stricte: Tous les filtres activés, paramètres serrés
-        ict_bot.USE_FVG_MITIGATION_FILTER = True
-        ict_bot.USE_BOS_RECENCY_FILTER = True
-        ict_bot.USE_MARKET_STRUCTURE_FILTER = True
-        ict_bot.BOS_MAX_AGE = 20
-        ict_bot.FVG_BOS_MAX_DISTANCE = 20
-        ict_bot.USE_ORDER_BLOCK_SL = True
-        ict_bot.USE_EXTREME_VOLATILITY_FILTER = True
-        ict_bot.VOLATILITY_MULTIPLIER_MAX = 3.0
+    mode = mode.lower()
 
-    elif preset_name == 'Default':
-        # Équilibré: Filtres essentiels activés
-        ict_bot.USE_FVG_MITIGATION_FILTER = False
-        ict_bot.USE_BOS_RECENCY_FILTER = True
-        ict_bot.USE_MARKET_STRUCTURE_FILTER = False
-        ict_bot.BOS_MAX_AGE = 30
-        ict_bot.FVG_BOS_MAX_DISTANCE = 30
-        ict_bot.USE_ORDER_BLOCK_SL = True
-        ict_bot.USE_EXTREME_VOLATILITY_FILTER = True
-        ict_bot.VOLATILITY_MULTIPLIER_MAX = 3.5
-
-    elif preset_name == 'Aggressive':
-        # Permissif: Moins de filtres, paramètres larges
-        ict_bot.USE_FVG_MITIGATION_FILTER = False
-        ict_bot.USE_BOS_RECENCY_FILTER = False
-        ict_bot.USE_MARKET_STRUCTURE_FILTER = False
-        ict_bot.BOS_MAX_AGE = 50
-        ict_bot.FVG_BOS_MAX_DISTANCE = 50
-        ict_bot.USE_ORDER_BLOCK_SL = True
-        ict_bot.USE_EXTREME_VOLATILITY_FILTER = False
-        ict_bot.VOLATILITY_MULTIPLIER_MAX = 5.0
+    if mode in ['advanced', 'complete']:
+        return GRID_PARAMS_ADVANCED
+    elif mode == 'standard':
+        return GRID_PARAMS
+    else:
+        print(f"[WARNING] Unknown mode '{mode}', using 'standard'")
+        return GRID_PARAMS
 
 
-def generate_all_combinations(grid_mode: str = 'standard') -> List[Dict[str, Any]]:
+def generate_all_combinations(mode: str = 'standard') -> List[Dict[str, Any]]:
     """
-    Genere toutes les combinaisons possibles de parametres selon le mode
+    Genere toutes les combinaisons possibles de parametres
 
     Args:
-        grid_mode: 'fast', 'standard', 'advanced', ou 'complete'
+        mode: 'standard' or 'advanced' - determines which param set to use
 
     Returns:
         Liste de dictionnaires de parametres
     """
-    # Validation du mode
-    if grid_mode not in ['fast', 'standard', 'advanced', 'complete']:
-        print(f"[ERROR] Invalid grid mode: {grid_mode}. Use: fast/standard/advanced/complete")
-        import sys
-        sys.exit(1)
-
-    # Sélectionner la grille appropriée
-    if grid_mode == 'fast':
-        grid_params = GRID_PARAMS_FAST
-        print(f"[GRID] Mode FAST : {len(list(itertools.product(*grid_params.values())))} combinaisons")
-    elif grid_mode == 'advanced':
-        grid_params = GRID_PARAMS_ADVANCED
-        print(f"[GRID] Mode ADVANCED : {len(list(itertools.product(*grid_params.values())))} combinaisons")
-    elif grid_mode == 'complete':
-        grid_params = GRID_PARAMS_COMPLETE
-        print(f"[GRID] Mode COMPLETE : {len(list(itertools.product(*grid_params.values())))} combinaisons")
-    else:  # 'standard' par défaut
-        grid_params = GRID_PARAMS
-        print(f"[GRID] Mode STANDARD : {len(list(itertools.product(*grid_params.values())))} combinaisons")
-
-    keys = list(grid_params.keys())
-    values = list(grid_params.values())
+    params = get_grid_params(mode)
+    keys = list(params.keys())
+    values = list(params.values())
 
     combinations = []
     for combination in itertools.product(*values):
@@ -251,40 +178,6 @@ def calculate_composite_score(results: Dict[str, float]) -> float:
     return composite
 
 
-def should_skip_combination(partial_results: List[Dict[str, Any]],
-                            min_winrate: float = 45.0,
-                            min_trades: int = 5,
-                            window_size: int = 5) -> bool:
-    """
-    Early stopping: Skip si les derniers résultats sont médiocres
-
-    Args:
-        partial_results: Résultats accumulés jusqu'à présent
-        min_winrate: Win rate minimum acceptable (%)
-        min_trades: Nombre minimum de trades requis
-        window_size: Nombre de résultats à analyser
-
-    Returns:
-        True si la combinaison doit être skippée
-    """
-    if len(partial_results) < window_size:
-        return False
-
-    recent_results = partial_results[-window_size:]
-
-    # Vérifier win rate moyen
-    avg_winrate = np.mean([r['win_rate'] for r in recent_results])
-    if avg_winrate < min_winrate:
-        return True
-
-    # Vérifier nombre de trades moyen
-    avg_trades = np.mean([r['total_trades'] for r in recent_results])
-    if avg_trades < min_trades:
-        return True
-
-    return False
-
-
 def init_worker_batch(df_data, info_data):
     """
     Fonction d'initialisation appelée une fois par worker
@@ -306,15 +199,13 @@ def init_worker_batch(df_data, info_data):
     _ict_bot_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(_ict_bot_module)
 
-    # Logging silencieux pour éviter interférence avec tqdm
-    # (Utiliser tqdm.write() si vraiment nécessaire)
+    print(f"[WORKER {mp.current_process().name}] Initialisé avec données partagées")
 
 
 def run_single_backtest_batch(args: Tuple[int, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Execute un backtest avec batch processing
     OPTIMISATION: Réutilise le module ICT bot déjà chargé dans le worker
-    VERSION 2.1.1: Support des presets et 8 nouveaux paramètres ICT
     """
     global _shared_df, _shared_info, _ict_bot_module
 
@@ -324,29 +215,26 @@ def run_single_backtest_batch(args: Tuple[int, Dict[str, Any]]) -> Dict[str, Any
         # OPTIMISATION: Module déjà chargé, pas besoin de réimporter!
         ict_bot = _ict_bot_module
 
-        # Appliquer les paramètres de configuration de base
+        # Appliquer les paramètres de configuration (v1.0 core params)
         ict_bot.RISK_PER_TRADE = params.get('RISK_PER_TRADE', 0.01)
         ict_bot.RR_TAKE_PROFIT = params.get('RR_TAKE_PROFIT', 2.0)
-        ict_bot.MAX_CONCURRENT_TRADES = params.get('MAX_CONCURRENT_TRADES', 2)
+        ict_bot.MAX_CONCURRENT_TRADES = params.get('MAX_CONCURRENT_TRADES', 1)
         ict_bot.COOLDOWN_BARS = params.get('COOLDOWN_BARS', 5)
-        ict_bot.ML_THRESHOLD = params.get('ML_THRESHOLD', 0.4)
-        ict_bot.USE_ATR_FILTER = params.get('USE_ATR_FILTER', True)
-        ict_bot.USE_ADAPTIVE_RISK = params.get('USE_ADAPTIVE_RISK', False)
+        ict_bot.ML_THRESHOLD = params.get('ML_THRESHOLD', 0.5)
+        ict_bot.USE_ATR_FILTER = params.get('USE_ATR_FILTER', False)
+        ict_bot.USE_CIRCUIT_BREAKER = params.get('USE_CIRCUIT_BREAKER', False)
 
-        # v2.1.1: Appliquer PRESET si présent (mode FAST)
-        if 'FILTER_PRESET' in params:
-            apply_filter_preset(ict_bot, params['FILTER_PRESET'])
-        else:
-            # v2.1.1: Appliquer paramètres ICT individuels (mode STANDARD/ADVANCED/COMPLETE)
-            # S'assurer que TOUS les 8 paramètres ICT sont appliqués
-            ict_bot.USE_FVG_MITIGATION_FILTER = params.get('USE_FVG_MITIGATION_FILTER', False)
-            ict_bot.USE_BOS_RECENCY_FILTER = params.get('USE_BOS_RECENCY_FILTER', True)
-            ict_bot.USE_MARKET_STRUCTURE_FILTER = params.get('USE_MARKET_STRUCTURE_FILTER', False)
-            ict_bot.BOS_MAX_AGE = params.get('BOS_MAX_AGE', 30)
-            ict_bot.FVG_BOS_MAX_DISTANCE = params.get('FVG_BOS_MAX_DISTANCE', 30)
-            ict_bot.USE_ORDER_BLOCK_SL = params.get('USE_ORDER_BLOCK_SL', True)
-            ict_bot.USE_EXTREME_VOLATILITY_FILTER = params.get('USE_EXTREME_VOLATILITY_FILTER', True)
-            ict_bot.VOLATILITY_MULTIPLIER_MAX = params.get('VOLATILITY_MULTIPLIER_MAX', 3.5)
+        # v2.0 ICT Strategy Enhancements - Set from params or use defaults
+        # This ensures compatibility with both standard and advanced modes
+        ict_bot.BOS_MAX_AGE = params.get('BOS_MAX_AGE', 20)
+        ict_bot.FVG_BOS_MAX_DISTANCE = params.get('FVG_BOS_MAX_DISTANCE', 20)
+        ict_bot.VOLATILITY_MULTIPLIER_MAX = params.get('VOLATILITY_MULTIPLIER_MAX', 3.0)
+
+        # v2.0 Boolean filters - Always use safe defaults (all enabled)
+        # These are not tested in grid search to keep test count manageable
+        for param_name, default_value in V20_BOOLEAN_DEFAULTS.items():
+            if hasattr(ict_bot, param_name):
+                setattr(ict_bot, param_name, default_value)
 
         # Désactiver le ML pour plus de rapidité
         ict_bot.USE_ML_META_LABELLING = False
@@ -422,16 +310,10 @@ def run_batch_of_backtests(batch_args: List[Tuple[int, Dict[str, Any]]]) -> List
 def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
                           max_workers: int = None,
                           batch_size: int = 10,
-                          grid_mode: str = 'standard',
-                          use_early_stopping: bool = False,
+                          mode: str = 'standard',
                           callback=None) -> List[Dict[str, Any]]:
     """
     Execute la recherche en grille avec BATCH PROCESSING
-
-    VERSION 2.1.1:
-    - 3 grilles progressives: fast (864), standard (2,592), advanced (20,736)
-    - Support des presets ICT (Conservative/Default/Aggressive)
-    - Early stopping optionnel pour skip les mauvais paramètres
 
     OPTIMISATION BATCH:
     - Traite plusieurs configurations par worker (batch_size)
@@ -444,26 +326,27 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
         bars: Nombre de barres
         max_workers: Nombre de workers (None = auto-detect)
         batch_size: Nombre de configs à traiter par batch (défaut: 10)
-        grid_mode: 'fast', 'standard', ou 'advanced'
-        use_early_stopping: Activer early stopping (défaut: False)
+        mode: 'standard' (1,728 tests, 4-6 min) or 'advanced' (46,656 tests, 2-3h)
         callback: Fonction callback pour progression (progress, total)
 
     Returns:
         Liste des resultats tries par score composite
+
+    Mode Details:
+        - 'standard': v1.0 parameters only, fast baseline testing
+        - 'advanced': v2.0 with BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, VOLATILITY_MULTIPLIER_MAX
     """
     import time
 
     # Generer toutes les combinaisons selon le mode
-    combinations = generate_all_combinations(grid_mode=grid_mode)
+    combinations = generate_all_combinations(mode=mode)
     total_tests = len(combinations)
 
-    grid_names = {'fast': 'FAST', 'standard': 'STANDARD', 'advanced': 'ADVANCED', 'complete': 'COMPLETE'}
-    grid_name = grid_names.get(grid_mode, 'STANDARD')
-
-    print(f"\n[GRID SEARCH v2.1.1 - {grid_name}] Lancement de {total_tests} tests...")
-    print(f"[GRID SEARCH] Mode: {grid_name} | Batch size: {batch_size}")
-    print(f"[GRID SEARCH] Early stopping: {'ON' if use_early_stopping else 'OFF'}")
-    print(f"[GRID SEARCH] Parametres: {symbol} {timeframe} {bars} barres")
+    print(f"\n[GRID SEARCH BATCH] Lancement de {total_tests} tests (Mode: {mode.upper()})...")
+    print(f"[GRID SEARCH BATCH] Batch size: {batch_size} configs par worker")
+    print(f"[GRID SEARCH BATCH] Parametres: {symbol} {timeframe} {bars} barres")
+    if mode.lower() == 'advanced':
+        print(f"[GRID SEARCH BATCH] v2.0 Enhanced: Testing BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, VOLATILITY_MULTIPLIER_MAX")
 
     # Charger les données MT5 UNE SEULE FOIS (avec cache)
     print(f"[GRID SEARCH BATCH] Chargement des données MT5...")
@@ -478,7 +361,7 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
             bars=bars,
             max_cache_age_hours=24,
             force_reload=False,
-            use_numba=False  # IMPORTANT: Desactiver Numba car fvg_mitigated/market_structure manquants
+            use_numba=True  # Utiliser Numba si disponible
         )
 
         # Convertir SymbolInfo en dictionnaire pour le rendre picklable
@@ -533,79 +416,45 @@ def run_grid_search_batch(symbol: str, timeframe: str, bars: int,
 
     if max_workers == 1:
         # Mode sequentiel avec batch
-        print("[GRID SEARCH BATCH] Mode sequentiel avec batch processing")
+        print("[GRID SEARCH BATCH] Mode séquentiel avec batch processing")
 
         # Initialiser les données globales
         global _shared_df, _shared_info
         init_worker_batch(df, info_dict)
 
-        # Barre de progression avec tqdm (configuration optimisée Windows/Linux)
-        with tqdm(
-            total=total_tests,
-            desc="Grid Search",
-            unit="test",
-            ncols=100,  # Largeur fixe pour éviter redimensionnement
-            file=sys.stderr,  # Redirection stderr pour éviter conflits avec print()
-            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
-            disable=False
-        ) as pbar:
-            for batch in batches:
-                batch_results = run_batch_of_backtests(batch)
+        for batch in batches:
+            batch_results = run_batch_of_backtests(batch)
+            results.extend(batch_results)
+            completed += len(batch)
+
+            if callback:
+                callback(completed, total_tests)
+
+            if completed % 50 == 0 or completed == total_tests:
+                elapsed = time.time() - start_time
+                rate = completed / elapsed if elapsed > 0 else 0
+                remaining = (total_tests - completed) / rate if rate > 0 else 0
+                print(f"[GRID SEARCH BATCH] Progression: {completed}/{total_tests} "
+                      f"({rate:.1f} tests/s, reste ~{remaining/60:.1f} min)")
+
+    else:
+        # Mode parallele avec batch processing
+        print(f"[GRID SEARCH BATCH] Mode parallèle ({max_workers} workers)")
+
+        with mp.Pool(processes=max_workers, initializer=init_worker_batch, initargs=(df, info_dict)) as pool:
+            for batch_results in pool.imap_unordered(run_batch_of_backtests, batches, chunksize=1):
                 results.extend(batch_results)
-                completed += len(batch)
-
-                # Mise à jour de la barre
-                pbar.update(len(batch))
-
-                # Afficher les meilleurs résultats actuels dans la description
-                if results:
-                    best_result = max(results, key=lambda x: x.get('composite_score', 0))
-                    best_wr = best_result.get('win_rate', 0)
-                    best_trades = best_result.get('total_trades', 0)
-                    pbar.set_postfix({
-                        'Best_WR': f'{best_wr:.1f}%',
-                        'Best_Trades': best_trades,
-                        'Avg_time': f'{(time.time()-start_time)/completed:.2f}s/test' if completed > 0 else 'N/A'
-                    })
+                completed += len(batch_results)
 
                 if callback:
                     callback(completed, total_tests)
 
-    else:
-        # Mode parallele avec batch processing
-        print(f"[GRID SEARCH BATCH] Mode parallele ({max_workers} workers)")
-
-        # Barre de progression avec tqdm pour mode parallèle (configuration optimisée)
-        with tqdm(
-            total=total_tests,
-            desc="Grid Search (parallel)",
-            unit="test",
-            ncols=100,  # Largeur fixe
-            file=sys.stderr,  # Redirection stderr
-            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
-            disable=False
-        ) as pbar:
-            with mp.Pool(processes=max_workers, initializer=init_worker_batch, initargs=(df, info_dict)) as pool:
-                for batch_results in pool.imap_unordered(run_batch_of_backtests, batches, chunksize=1):
-                    results.extend(batch_results)
-                    completed += len(batch_results)
-
-                    # Mise à jour de la barre
-                    pbar.update(len(batch_results))
-
-                    # Afficher les meilleurs résultats actuels
-                    if results:
-                        best_result = max(results, key=lambda x: x.get('composite_score', 0))
-                        best_wr = best_result.get('win_rate', 0)
-                        best_trades = best_result.get('total_trades', 0)
-                        pbar.set_postfix({
-                            'Best_WR': f'{best_wr:.1f}%',
-                            'Best_Trades': best_trades,
-                            'Avg_time': f'{(time.time()-start_time)/completed:.2f}s/test' if completed > 0 else 'N/A'
-                        })
-
-                    if callback:
-                        callback(completed, total_tests)
+                if completed % 50 == 0 or completed == total_tests:
+                    elapsed = time.time() - start_time
+                    rate = completed / elapsed if elapsed > 0 else 0
+                    remaining = (total_tests - completed) / rate if rate > 0 else 0
+                    print(f"[GRID SEARCH BATCH] Progression: {completed}/{total_tests} "
+                          f"({rate:.1f} tests/s, reste ~{remaining/60:.1f} min)")
 
     # Trier par score composite
     results.sort(key=lambda x: x['composite_score'], reverse=True)
@@ -622,49 +471,40 @@ def save_top_results(results: List[Dict[str, Any]],
                     symbol: str,
                     timeframe: str,
                     bars: int,
-                    grid_mode: str = 'standard',
-                    use_early_stopping: bool = False,
+                    mode: str = 'standard',
                     top_n: int = 5) -> str:
     """
     Sauvegarde les N meilleurs resultats dans Grid/
-    VERSION 2.1.1: Inclut les métadonnées de la grille et early stopping
+
+    Args:
+        results: Liste des résultats de tests
+        symbol: Symbole testé
+        timeframe: Timeframe testé
+        bars: Nombre de barres
+        mode: Mode de grid search ('standard' ou 'advanced')
+        top_n: Nombre de top configs à sauvegarder
+
+    Returns:
+        Chemin du fichier JSON créé
     """
     os.makedirs('Grid', exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"Grid/grid_results_{symbol}_{timeframe}_{grid_mode}_{timestamp}.json"
-
-    # Calculer statistiques globales
-    import time
-    successful_tests = [r for r in results if r.get('success', False)]
-    avg_winrate = np.mean([r['win_rate'] for r in successful_tests]) if successful_tests else 0
-    avg_pnl = np.mean([r['pnl_pct'] for r in successful_tests]) if successful_tests else 0
-    avg_trades = np.mean([r['total_trades'] for r in successful_tests]) if successful_tests else 0
-    failed_tests = len(results) - len(successful_tests)
-
-    # Calculer temps d'exécution (approximation basée sur timestamp)
-    execution_time_seconds = 0  # Sera rempli par l'appelant si disponible
+    mode_suffix = f"_{mode}" if mode != 'standard' else ''
+    filename = f"Grid/grid_results_{symbol}_{timeframe}{mode_suffix}_{timestamp}.json"
 
     report = {
         'metadata': {
-            'version': '2.1.1',
-            'grid_mode': grid_mode,
             'symbol': symbol,
             'timeframe': timeframe,
             'bars': bars,
             'total_tests': len(results),
-            'successful_tests': len(successful_tests),
-            'failed_tests': failed_tests,
-            'early_stopping_enabled': use_early_stopping,
             'timestamp': timestamp,
             'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'mode': mode,
             'optimized_version': True,
             'batch_processing': True,
-            'average_winrate': float(avg_winrate),
-            'average_pnl': float(avg_pnl),
-            'average_trades': float(avg_trades),
-            'execution_time_seconds': execution_time_seconds,
-            'tests_per_second': 0.0  # Sera calculé par l'appelant
+            'v2_enhanced': mode.lower() in ['advanced', 'complete']
         },
         'top_configs': results[:top_n]
     }
@@ -672,117 +512,86 @@ def save_top_results(results: List[Dict[str, Any]],
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=4, ensure_ascii=False)
 
-    print(f"\n[GRID SEARCH] Top {top_n} resultats sauvegardes dans: {filename}")
+    print(f"\n[GRID SEARCH BATCH] Top {top_n} resultats sauvegardes dans: {filename}")
 
     return filename
 
 
 def main():
-    """Fonction principale pour test en ligne de commande - VERSION 2.1.1"""
+    """Fonction principale pour test en ligne de commande"""
     import sys
 
-    if len(sys.argv) < 4:
-        print("\nGrid Search Engine v2.1.1 - ICT Trading Bot")
-        print("=" * 60)
-        print("\nUsage: python grid_search_engine_batch.py SYMBOL TIMEFRAME BARS [OPTIONS]")
-        print("\nPositional arguments:")
-        print("  SYMBOL      : Symbol to test (e.g., EURUSD, XAUUSD)")
-        print("  TIMEFRAME   : Timeframe (M5, M15, H1, H4, D1)")
-        print("  BARS        : Number of bars to test")
-        print("\nOptional arguments:")
-        print("  WORKERS     : Number of parallel workers (default: auto)")
-        print("  BATCH_SIZE  : Configs per batch (default: 10)")
-        print("  --grid MODE : Grid mode - fast/standard/advanced/complete (default: standard)")
-        print("                fast     = 864 tests (~2-3 min)")
-        print("                standard = 2,592 tests (~5-7 min)")
-        print("                advanced = 20,736 tests (~15-20 min)")
-        print("                complete = 27,648 tests (~25-30 min)")
-        print("  --early-stop: Enable early stopping (skip low performers)")
+    # Afficher l'aide si nécessaire
+    if len(sys.argv) < 4 or '--help' in sys.argv or '-h' in sys.argv:
+        print("="*80)
+        print("GRID SEARCH ENGINE - v2.0 Enhanced")
+        print("="*80)
+        print("\nUsage:")
+        print("  python grid_search_engine_batch.py SYMBOL TIMEFRAME BARS [WORKERS] [BATCH_SIZE] [--mode MODE]")
+        print("\nArguments:")
+        print("  SYMBOL       : Trading pair (e.g., EURUSD, GBPUSD)")
+        print("  TIMEFRAME    : Timeframe (M5, H1, H4, etc.)")
+        print("  BARS         : Number of bars to test")
+        print("  WORKERS      : Number of parallel workers (optional, default: auto)")
+        print("  BATCH_SIZE   : Configs per batch (optional, default: 10)")
+        print("  --mode MODE  : Grid search mode (optional, default: standard)")
+        print("\nModes:")
+        print("  standard     : v1.0 parameters, 1,728 tests (~4-6 min)")
+        print("  advanced     : v2.0 enhanced, 46,656 tests (~2-3 hours)")
+        print("                 Tests: BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, VOLATILITY_MULTIPLIER_MAX")
         print("\nExamples:")
-        print("  python grid_search_engine_batch.py EURUSD H1 5000")
-        print("  python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid fast")
-        print("  python grid_search_engine_batch.py XAUUSD H4 2000 2 10 --grid advanced --early-stop")
-        print("  python grid_search_engine_batch.py EURUSD H1 5000 2 10 --grid complete")
-        print("=" * 60)
-        sys.exit(1)
+        print("  python grid_search_engine_batch.py EURUSD H1 2000")
+        print("  python grid_search_engine_batch.py EURUSD H1 2000 2 10")
+        print("  python grid_search_engine_batch.py EURUSD H1 2000 2 10 --mode advanced")
+        print("  python grid_search_engine_batch.py GBPUSD H4 1500 --mode advanced")
+        print("="*80)
+        sys.exit(0)
 
     # Parser les arguments
     symbol = sys.argv[1]
     timeframe = sys.argv[2]
     bars = int(sys.argv[3])
 
-    # Arguments nommés optionnels (parser AVANT positionnels pour exclure leurs valeurs)
-    grid_mode = 'standard'
-    use_early_stopping = False
+    # Arguments optionnels
+    workers = None
+    batch_size = 10
+    mode = 'standard'
 
-    # Indices à exclure des arguments positionnels
-    excluded_indices = set()
+    # Parser les arguments restants
+    i = 4
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == '--mode' and i + 1 < len(sys.argv):
+            mode = sys.argv[i + 1]
+            i += 2
+        elif arg.startswith('--mode='):
+            mode = arg.split('=')[1]
+            i += 1
+        elif workers is None and arg.isdigit():
+            workers = int(arg)
+            i += 1
+        elif arg.isdigit():
+            batch_size = int(arg)
+            i += 1
+        else:
+            i += 1
 
-    if '--grid' in sys.argv:
-        grid_idx = sys.argv.index('--grid')
-        excluded_indices.add(grid_idx)
-        if grid_idx + 1 < len(sys.argv):
-            excluded_indices.add(grid_idx + 1)
-            grid_mode = sys.argv[grid_idx + 1]
-            if grid_mode not in ['fast', 'standard', 'advanced', 'complete']:
-                print(f"[ERROR] Invalid grid mode: {grid_mode}")
-                print("Available modes:")
-                print("  - fast     : 864 tests (~2-3 min) - Preset screening")
-                print("  - standard : 2,592 tests (~5-7 min) - Production")
-                print("  - advanced : 20,736 tests (~15-20 min) - R&D exhaustif")
-                print("  - complete : 27,648 tests (~25-30 min) - ALL parameters")
-                sys.exit(1)
+    # Afficher la configuration
+    print(f"\n[CONFIG] Symbol: {symbol}")
+    print(f"[CONFIG] Timeframe: {timeframe}")
+    print(f"[CONFIG] Bars: {bars}")
+    print(f"[CONFIG] Workers: {workers if workers else 'auto'}")
+    print(f"[CONFIG] Batch Size: {batch_size}")
+    print(f"[CONFIG] Mode: {mode.upper()}")
 
-    if '--early-stop' in sys.argv:
-        early_stop_idx = sys.argv.index('--early-stop')
-        excluded_indices.add(early_stop_idx)
-        use_early_stopping = True
+    # Lancer le grid search BATCH
+    results = run_grid_search_batch(symbol, timeframe, bars,
+                                     max_workers=workers,
+                                     batch_size=batch_size,
+                                     mode=mode)
 
-    # Arguments positionnels optionnels (exclure les flags nommés ET leurs valeurs)
-    pos_args = []
-    for i, arg in enumerate(sys.argv[4:], start=4):
-        if not arg.startswith('--') and i not in excluded_indices:
-            pos_args.append(arg)
-
-    workers = int(pos_args[0]) if len(pos_args) > 0 else None
-    batch_size = int(pos_args[1]) if len(pos_args) > 1 else 10
-
-    # Lancer le grid search BATCH v2.1.1
-    import time
-    start_time = time.time()
-
-    results = run_grid_search_batch(
-        symbol=symbol,
-        timeframe=timeframe,
-        bars=bars,
-        max_workers=workers,
-        batch_size=batch_size,
-        grid_mode=grid_mode,
-        use_early_stopping=use_early_stopping
-    )
-
-    elapsed_time = time.time() - start_time
-
-    # Sauvegarder les top 5 avec métadonnées enrichies
-    report_path = save_top_results(
-        results=results,
-        symbol=symbol,
-        timeframe=timeframe,
-        bars=bars,
-        grid_mode=grid_mode,
-        use_early_stopping=use_early_stopping,
-        top_n=5
-    )
-
-    # Enrichir le fichier JSON avec temps d'exécution
-    with open(report_path, 'r', encoding='utf-8') as f:
-        report_data = json.load(f)
-
-    report_data['metadata']['execution_time_seconds'] = int(elapsed_time)
-    report_data['metadata']['tests_per_second'] = round(len(results) / elapsed_time, 2) if elapsed_time > 0 else 0
-
-    with open(report_path, 'w', encoding='utf-8') as f:
-        json.dump(report_data, f, indent=4, ensure_ascii=False)
+    # Sauvegarder les top 5
+    report_path = save_top_results(results, symbol, timeframe, bars, mode=mode, top_n=5)
 
     # Afficher les resultats
     print("\n" + "="*80)

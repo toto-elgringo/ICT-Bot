@@ -12,7 +12,6 @@ backtest/
 machineLearning/
 log/
 Grid/
-Grid-old/
 cache_mt5/
 
 # Private documents
@@ -55,7 +54,6 @@ ENV/
 .claude/
 *.swp
 *.swo
-CLAUDE.md
 
 # Logs
 *.log

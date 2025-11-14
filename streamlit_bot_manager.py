@@ -12,7 +12,6 @@ import subprocess
 import os
 import json
 import time
-import glob
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
@@ -72,11 +71,11 @@ def create_default_config():
             'USE_CIRCUIT_BREAKER': True,
             'DAILY_DD_LIMIT': 0.03,
             'USE_ADAPTIVE_RISK': True,
-            # NOUVEAUX PARAMETRES v2.1
-            'USE_FVG_MITIGATION_FILTER': True,
+            # v2.0 ICT Strategy Enhancements
             'USE_BOS_RECENCY_FILTER': True,
-            'USE_MARKET_STRUCTURE_FILTER': True,
             'BOS_MAX_AGE': 20,
+            'USE_FVG_MITIGATION_FILTER': True,
+            'USE_MARKET_STRUCTURE_FILTER': True,
             'FVG_BOS_MAX_DISTANCE': 20,
             'USE_ORDER_BLOCK_SL': True,
             'USE_EXTREME_VOLATILITY_FILTER': True,
@@ -170,42 +169,6 @@ def delete_ml_model(bot_name):
         except Exception as e:
             return False, f"Erreur lors de la suppression du modèle ML: {e}"
     return True, "Aucun modèle ML à supprimer"
-
-def delete_all_ml_models():
-    """Supprime TOUS les fichiers .pkl du dossier machineLearning/ (utile pour v2.1 upgrade)"""
-    ensure_ml_directory()
-    deleted_count = 0
-    errors = []
-
-    for file in os.listdir('machineLearning'):
-        if file.endswith('.pkl'):
-            try:
-                os.remove(os.path.join('machineLearning', file))
-                deleted_count += 1
-            except Exception as e:
-                errors.append(f"{file}: {e}")
-
-    if errors:
-        return False, f"Supprimé {deleted_count} modèles, {len(errors)} erreurs: {', '.join(errors)}"
-    return True, f"✅ {deleted_count} modèles ML supprimés avec succès"
-
-def check_ml_model_compatibility(bot_name):
-    """Vérifie si le modèle ML d'un bot existe et retourne un avertissement si incompatible v2.1"""
-    ml_path = get_ml_model_path(bot_name)
-    if not os.path.exists(ml_path):
-        return "warning", "Aucun modèle ML trouvé - sera créé au premier démarrage"
-
-    # Vérifier si c'est un ancien modèle (v2.0 = 5 features, v2.1 = 12 features)
-    try:
-        import joblib
-        model = joblib.load(ml_path)
-        # Si le modèle a été entraîné, vérifier le nombre de features
-        if hasattr(model, 'n_features_in_'):
-            if model.n_features_in_ < 12:
-                return "error", f"⚠️ Modèle v2.0 incompatible ({model.n_features_in_} features, 12 attendues). Supprimez le modèle."
-        return "success", "Modèle ML compatible v2.1"
-    except Exception as e:
-        return "warning", f"Impossible de vérifier le modèle: {e}"
 
 # ===============================
 # GESTION DES LOGS
@@ -456,11 +419,11 @@ if 'config' not in st.session_state:
         'USE_CIRCUIT_BREAKER': True,
         'DAILY_DD_LIMIT': 0.03,
         'USE_ADAPTIVE_RISK': True,
-        # NOUVEAUX PARAMETRES v2.1
-        'USE_FVG_MITIGATION_FILTER': True,
+        # v2.0 ICT Strategy Enhancements
         'USE_BOS_RECENCY_FILTER': True,
-        'USE_MARKET_STRUCTURE_FILTER': True,
         'BOS_MAX_AGE': 20,
+        'USE_FVG_MITIGATION_FILTER': True,
+        'USE_MARKET_STRUCTURE_FILTER': True,
         'FVG_BOS_MAX_DISTANCE': 20,
         'USE_ORDER_BLOCK_SL': True,
         'USE_EXTREME_VOLATILITY_FILTER': True,
@@ -472,8 +435,43 @@ if 'config' not in st.session_state:
 # ===============================
 # TITRE PRINCIPAL
 # ===============================
-st.title("🤖 ICT Trading Bot Manager v2.1")
+st.title("🤖 ICT Trading Bot Manager v2.0")
 st.markdown("### Centre de Controle Avance avec Suivi Temps Reel")
+
+# ===============================
+# V2.0 MIGRATION WARNING BANNER
+# ===============================
+with st.expander("⚠️ ICT Bot v2.0 - Breaking Change - LIRE AVANT UTILISATION", expanded=False):
+    st.warning("""
+**La stratégie a été mise à niveau vers v2.0 avec 12 features ML (vs 5 en v1.0).**
+
+### Action Requise
+Supprimez tous les fichiers `.pkl` dans le dossier `machineLearning/` avant de relancer les bots existants.
+
+**Pourquoi ?** Les modèles ML v1.0 sont incompatibles avec v2.0 (5 features → 12 features).
+
+### Nouvelles Fonctionnalités v2.0
+- ✅ **Validation de récence des BOS** - Seuls les BOS récents (< 20 barres) sont utilisés
+- ✅ **Tracking de mitigation des FVG** - Ignore les FVG déjà touchés par le prix
+- ✅ **Détection de structure de marché** - Valide HH/HL (haussier) ou LL/LH (baissier)
+- ✅ **Confluence temporelle stricte** - FVG et BOS doivent être < 20 barres de distance
+- ✅ **Order Blocks pour Stop Loss** - Utilise les Order Blocks au lieu des swing points
+- ✅ **Filtre de volatilité extrême** - Protection contre les news (ATR > 3× médiane)
+
+### Résultats v2.0 (EURUSD M5, 14.5 mois)
+- 📈 Win Rate: **59-63%** (+10% vs v1.0)
+- 📉 Max Drawdown: **-8% à -10%** (-7% amélioration vs v1.0)
+- 📊 Trades: **170-210** (-35% volume - qualité > quantité)
+- 🎯 12 features ML pour meilleure détection de marché
+
+### Migration
+1. Arrêtez tous les bots
+2. Supprimez `machineLearning/*.pkl` (Windows: `del machineLearning\\*.pkl` | Linux/Mac: `rm machineLearning/*.pkl`)
+3. Redémarrez les bots (les modèles ML se recréeront automatiquement)
+""")
+
+    st.info("💡 **Astuce**: Les nouveaux paramètres v2.0 sont dans l'onglet 'Paramètres' → Section 'Filtres ICT v2.0'")
+
 st.markdown("---")
 
 # ===============================
@@ -495,38 +493,6 @@ with st.sidebar:
 
     if st.button("🔄 Rafraichir", use_container_width=True):
         st.rerun()
-
-    st.markdown("---")
-
-    st.markdown(f"""
-**ICT Bot Manager**
-Version: `v2.1.1`
-Mode: Multi-bot
-
-**v2.1.1 Features** ✨
-- 🎯 Filtres ICT configurables
-- 🎨 3 presets optimisés
-- 🚀 Grid search 3 modes
-- ⚡ Early stopping
-""")
-
-    st.markdown("---")
-
-    # Section Maintenance ML
-    with st.expander("🧹 Maintenance ML v2.1"):
-        st.caption("⚠️ Les modèles ML v2.0 sont incompatibles avec v2.1 (5 features → 12 features)")
-        st.caption("Si vous rencontrez des erreurs au démarrage, supprimez les anciens modèles.")
-
-        if st.button("🗑️ Supprimer TOUS les modèles ML", type="secondary", use_container_width=True, key="delete_all_ml"):
-            if active_bots > 0:
-                st.error("⚠️ Arrêtez d'abord tous les bots avant de supprimer les modèles ML")
-            else:
-                success, msg = delete_all_ml_models()
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-                st.rerun()
 
 # ===============================
 # ONGLETS PRINCIPAUX
@@ -714,14 +680,6 @@ with tab1:
                         else:
                             st.error("⏸️ Bot arrêté")
 
-                    # Vérification compatibilité ML (afficher un warning si modèle incompatible)
-                    ml_status, ml_message = check_ml_model_compatibility(bot['name'])
-                    if ml_status == "error":
-                        st.error(ml_message)
-                        st.caption("👉 Utilisez le bouton 'Supprimer TOUS les modèles ML' dans la sidebar")
-                    elif ml_status == "warning" and not is_running:
-                        st.warning(ml_message)
-
                     st.markdown("---")
 
                 # Boutons de contrôle (seulement si pas en édition)
@@ -889,38 +847,6 @@ with tab2:
     available_configs = load_configs_list()
 
     # ===============================
-    # SECTION: PRESETS RAPIDES v2.1.1
-    # ===============================
-    st.markdown("---")
-    st.markdown("### 🎨 Presets Rapides v2.1.1")
-    st.info("""
-**Presets optimisés** pour démarrer rapidement :
-- **Conservative** : 50-80 trades, 65-75% win rate (ultra-strict)
-- **Default** : 150-200 trades, 58-62% win rate (équilibré) ⭐
-- **Aggressive** : 300-400 trades, 52-56% win rate (scalping)
-""")
-
-    preset_choice = st.selectbox(
-        "Charger un preset",
-        ["Aucun (personnalisé)", "Conservative", "Default", "Aggressive"],
-        help="Charge une configuration pré-optimisée"
-    )
-
-    if preset_choice != "Aucun (personnalisé)":
-        if st.button(f"📥 Charger le preset {preset_choice}"):
-            preset_path = f"config/{preset_choice}.json"
-            if os.path.exists(preset_path):
-                with open(preset_path, 'r') as f:
-                    loaded_config = json.load(f)
-                st.session_state['config'] = loaded_config
-                st.success(f"✅ Preset {preset_choice} chargé avec succès !")
-                st.rerun()
-            else:
-                st.error(f"❌ Fichier {preset_path} introuvable")
-
-    st.markdown("---")
-
-    # ===============================
     # SECTION: CRÉER UNE NOUVELLE CONFIG
     # ===============================
     with st.expander("➕ Créer une nouvelle configuration", expanded=st.session_state.creating_new_config):
@@ -1003,7 +929,7 @@ with tab2:
                         )
 
                 with col3:
-                    st.subheader("🔧 Filtres Generaux")
+                    st.subheader("🔧 Filtres")
                     config['USE_ATR_FILTER'] = st.checkbox(
                         "Filtre ATR", config.get('USE_ATR_FILTER', False), key=f"atr_use_{config_name}"
                     )
@@ -1027,63 +953,81 @@ with tab2:
                         "Risque Adaptatif", config.get('USE_ADAPTIVE_RISK', False), key=f"adapt_risk_{config_name}"
                     )
 
-                # Nouvelle colonne pour les filtres ICT v2.1
+                # ===============================
+                # v2.0 ICT FILTERS SECTION
+                # ===============================
                 st.markdown("---")
-                col4, col5 = st.columns(2)
+                st.subheader("🎯 Filtres ICT v2.0 (Nouveaux)")
 
-                with col4:
-                    st.subheader("🎯 Filtres ICT v2.1")
-                    config['USE_FVG_MITIGATION_FILTER'] = st.checkbox(
-                        "FVG Mitigation Filter",
-                        config.get('USE_FVG_MITIGATION_FILTER', True),
-                        key=f"fvg_mitig_{config_name}",
-                        help="Ignore les FVG deja mitigees par le prix"
-                    )
+                col_v20_1, col_v20_2, col_v20_3 = st.columns(3)
+
+                with col_v20_1:
+                    st.markdown("**Filtrage BOS & FVG**")
                     config['USE_BOS_RECENCY_FILTER'] = st.checkbox(
-                        "BOS Recency Filter",
+                        "Filtre récence BOS",
                         config.get('USE_BOS_RECENCY_FILTER', True),
-                        key=f"bos_rec_{config_name}",
-                        help="Le BOS doit etre recent (< BOS_MAX_AGE barres)"
+                        key=f"bos_recency_{config_name}",
+                        help="N'utiliser que les BOS des N dernières barres"
                     )
                     if config['USE_BOS_RECENCY_FILTER']:
                         config['BOS_MAX_AGE'] = st.slider(
-                            "BOS Max Age (barres)", 5, 50, config.get('BOS_MAX_AGE', 20), 5, key=f"bos_age_{config_name}"
+                            "Age max BOS (barres)",
+                            10, 50,
+                            config.get('BOS_MAX_AGE', 20),
+                            key=f"bos_age_{config_name}",
+                            help="Seuls les BOS des N dernières barres sont valides"
                         )
 
-                    config['USE_MARKET_STRUCTURE_FILTER'] = st.checkbox(
-                        "Market Structure Filter",
-                        config.get('USE_MARKET_STRUCTURE_FILTER', True),
-                        key=f"mkt_struct_{config_name}",
-                        help="Valide la structure HH/HL (bullish) ou LL/LH (bearish)"
+                    config['USE_FVG_MITIGATION_FILTER'] = st.checkbox(
+                        "Mitigation FVG",
+                        config.get('USE_FVG_MITIGATION_FILTER', True),
+                        key=f"fvg_mitigation_{config_name}",
+                        help="Ignorer les FVG déjà touchés par le prix"
                     )
 
-                with col5:
-                    st.subheader("📊 Stop Loss & Volatilite")
+                with col_v20_2:
+                    st.markdown("**Structure & Confluence**")
+                    config['USE_MARKET_STRUCTURE_FILTER'] = st.checkbox(
+                        "Structure de marché",
+                        config.get('USE_MARKET_STRUCTURE_FILTER', True),
+                        key=f"market_struct_{config_name}",
+                        help="Valider la structure HH/HL (haussier) ou LL/LH (baissier)"
+                    )
+
+                    config['FVG_BOS_MAX_DISTANCE'] = st.slider(
+                        "Distance FVG-BOS max",
+                        10, 50,
+                        config.get('FVG_BOS_MAX_DISTANCE', 20),
+                        key=f"fvg_bos_dist_{config_name}",
+                        help="Distance maximale (barres) entre FVG et BOS pour confluence"
+                    )
+
                     config['USE_ORDER_BLOCK_SL'] = st.checkbox(
                         "Order Block SL",
                         config.get('USE_ORDER_BLOCK_SL', True),
                         key=f"ob_sl_{config_name}",
-                        help="Utilise les Order Blocks pour SL au lieu des swing points"
-                    )
-                    config['FVG_BOS_MAX_DISTANCE'] = st.slider(
-                        "FVG-BOS Distance Max", 5, 50, config.get('FVG_BOS_MAX_DISTANCE', 20), 5,
-                        key=f"fvg_bos_dist_{config_name}",
-                        help="Distance maximale entre FVG et BOS pour confluence"
+                        help="Utiliser Order Blocks pour Stop Loss (vs swing points)"
                     )
 
+                with col_v20_3:
+                    st.markdown("**Protection Volatilité**")
                     config['USE_EXTREME_VOLATILITY_FILTER'] = st.checkbox(
-                        "Extreme Volatility Filter",
+                        "Filtre volatilité extrême",
                         config.get('USE_EXTREME_VOLATILITY_FILTER', True),
-                        key=f"extr_vol_{config_name}",
-                        help="Evite de trader en volatilite extreme (news, crash)"
+                        key=f"vol_filter_{config_name}",
+                        help="Ignorer trades si ATR > N × médiane ATR (protection news)"
                     )
                     if config['USE_EXTREME_VOLATILITY_FILTER']:
                         config['VOLATILITY_MULTIPLIER_MAX'] = st.slider(
-                            "Volatilite Max (x median)", 1.5, 5.0, config.get('VOLATILITY_MULTIPLIER_MAX', 3.0), 0.5,
+                            "Multiplicateur max ATR",
+                            2.0, 5.0,
+                            config.get('VOLATILITY_MULTIPLIER_MAX', 3.0),
+                            0.5,
                             key=f"vol_mult_{config_name}",
-                            help="ATR max = median_ATR * ce multiplicateur"
+                            help="Rejeter si ATR actuel > N × médiane ATR (défaut: 3.0)"
                         )
 
+                st.markdown("---")
                 col_save, col_cancel = st.columns(2)
                 with col_save:
                     if st.button("💾 Sauvegarder", type="primary", use_container_width=True, key=f"save_config_{config_name}"):
@@ -1112,6 +1056,19 @@ with tab2:
                 with col_info3:
                     st.metric("ATR Filter", "✅" if config.get('USE_ATR_FILTER', False) else "❌")
                     st.metric("Circuit Breaker", "✅" if config.get('USE_CIRCUIT_BREAKER', False) else "❌")
+
+                # Afficher les paramètres v2.0
+                st.markdown("**🎯 Filtres ICT v2.0:**")
+                col_v20_display1, col_v20_display2, col_v20_display3 = st.columns(3)
+                with col_v20_display1:
+                    st.caption(f"BOS Recency: {'✅' if config.get('USE_BOS_RECENCY_FILTER', True) else '❌'} (max {config.get('BOS_MAX_AGE', 20)} barres)")
+                    st.caption(f"FVG Mitigation: {'✅' if config.get('USE_FVG_MITIGATION_FILTER', True) else '❌'}")
+                with col_v20_display2:
+                    st.caption(f"Market Structure: {'✅' if config.get('USE_MARKET_STRUCTURE_FILTER', True) else '❌'}")
+                    st.caption(f"FVG-BOS Distance: max {config.get('FVG_BOS_MAX_DISTANCE', 20)} barres")
+                with col_v20_display3:
+                    st.caption(f"Order Block SL: {'✅' if config.get('USE_ORDER_BLOCK_SL', True) else '❌'}")
+                    st.caption(f"Vol. Filter: {'✅' if config.get('USE_EXTREME_VOLATILITY_FILTER', True) else '❌'} (×{config.get('VOLATILITY_MULTIPLIER_MAX', 3.0)})")
 
                 # Bots utilisant cette config
                 if bots_using:
@@ -1147,25 +1104,7 @@ with tab2:
 with tab3:
     st.header("🧪 Backtest avec Configuration")
 
-    st.markdown("### 📋 Configuration")
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        # Charger la liste des configurations disponibles
-        available_configs_bt = load_configs_list()
-        bt_config_name = st.selectbox(
-            "Configuration",
-            available_configs_bt,
-            index=available_configs_bt.index('Default') if 'Default' in available_configs_bt else 0,
-            key="backtest_config",
-            help="Default recommandé pour la plupart des cas"
-        )
-
-    st.markdown("---")
-    st.markdown("### 🔧 Paramètres du Backtest")
-
-    col_bt1, col_bt2, col_bt3 = st.columns(3)
+    col_bt1, col_bt2, col_bt3, col_bt4 = st.columns(4)
 
     with col_bt1:
         bt_symbol = st.selectbox(
@@ -1192,6 +1131,19 @@ with tab3:
             step=1000,
             key="backtest_bars"
         )
+
+    with col_bt4:
+        # Charger la liste des configurations disponibles
+        available_configs_bt = load_configs_list()
+        bt_config_name = st.selectbox(
+            "⚙️ Configuration",
+            available_configs_bt,
+            index=0 if 'Default' in available_configs_bt else 0,
+            key="backtest_config",
+            help="Sélectionnez la configuration à tester"
+        )
+
+    st.info(f"ℹ️ Le backtest utilisera la configuration '{bt_config_name}' depuis le dossier config/")
 
     if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
@@ -1272,6 +1224,74 @@ with tab4:
                 st.metric("PnL", f"${pnl:,.2f}")
             with col_h4:
                 st.metric("Max DD", f"{max_dd:.2f}%")
+
+            # Afficher les statistiques v2.0 si disponibles
+            if 'statistics' in backtest_data:
+                stats = backtest_data['statistics']
+
+                # Vérifier si des stats v2.0 existent
+                has_v20_stats = any(key in stats for key in [
+                    'fvg_mitigated_filtered', 'bos_too_old_filtered',
+                    'fvg_bos_too_far_filtered', 'market_structure_filtered',
+                    'extreme_volatility_filtered'
+                ])
+
+                if has_v20_stats:
+                    st.markdown("---")
+                    st.subheader("📊 Statistiques de Filtrage v2.0")
+
+                    col_v20_s1, col_v20_s2, col_v20_s3, col_v20_s4, col_v20_s5 = st.columns(5)
+
+                    with col_v20_s1:
+                        fvg_mitigated = stats.get('fvg_mitigated_filtered', 0)
+                        st.metric(
+                            "FVG Mitigés",
+                            fvg_mitigated,
+                            help="FVG déjà touchés par le prix (ignorés)"
+                        )
+
+                    with col_v20_s2:
+                        bos_old = stats.get('bos_too_old_filtered', 0)
+                        st.metric(
+                            "BOS Trop Anciens",
+                            bos_old,
+                            help="BOS de plus de BOS_MAX_AGE barres (ignorés)"
+                        )
+
+                    with col_v20_s3:
+                        fvg_bos_far = stats.get('fvg_bos_too_far_filtered', 0)
+                        st.metric(
+                            "FVG-BOS Éloignés",
+                            fvg_bos_far,
+                            help="Distance FVG-BOS > FVG_BOS_MAX_DISTANCE barres"
+                        )
+
+                    with col_v20_s4:
+                        market_struct = stats.get('market_structure_filtered', 0)
+                        st.metric(
+                            "Structure Invalide",
+                            market_struct,
+                            help="Structure de marché non conforme (HH/HL ou LL/LH)"
+                        )
+
+                    with col_v20_s5:
+                        extreme_vol = stats.get('extreme_volatility_filtered', 0)
+                        st.metric(
+                            "Volatilité Extrême",
+                            extreme_vol,
+                            help="ATR > VOLATILITY_MULTIPLIER_MAX × médiane"
+                        )
+
+                    # Calculer le total de filtres v2.0
+                    total_v20_filtered = (fvg_mitigated + bos_old + fvg_bos_far +
+                                         market_struct + extreme_vol)
+
+                    if total_v20_filtered > 0:
+                        st.info(f"🎯 Total filtrés par v2.0: **{total_v20_filtered}** signaux rejetés (amélioration qualité)")
+                    else:
+                        st.caption("Aucun signal filtré par les filtres v2.0 sur cette période")
+
+                    st.markdown("---")
         except json.JSONDecodeError:
             st.error(f"Erreur: Le fichier {selected_bt} est vide ou corrompu")
             st.warning("Ce fichier de backtest n'est pas valide. Lancez un nouveau backtest.")
@@ -1382,6 +1402,7 @@ with tab4:
                     hide_index=True
                 )
 
+                st.info(f"📈 {len(comparison_data)} backtest(s) comparé(s)")
             else:
                 st.warning("Aucun backtest valide sélectionné pour la comparaison")
         else:
@@ -1398,58 +1419,16 @@ with tab5:
     if not GRID_SEARCH_AVAILABLE:
         st.error("⚠️ Le module grid_search_engine_batch.py n'est pas disponible")
     else:
+        st.success("🚀 Grid Search Optimisé (25-35x speedup)")
+
         st.info(
-            "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)"
+            "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
+            "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)\n\n"
+            "**v2.0**: Utilise 12 features ML (vs 5 en v1.0) pour meilleure analyse de marché"
         )
 
         # Section: Configuration du test
-        st.markdown("### ⚙️ Configuration Grid Search v2.1.1")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            grid_mode = st.selectbox(
-                "Mode de grille",
-                ["fast", "standard", "advanced"],
-                index=1,
-                help="""
-- **FAST** : 864 combinaisons (2-3 min) - Screening rapide
-- **STANDARD** : 2,592 combinaisons (5-7 min) - Recommandé
-- **ADVANCED** : 20,736 combinaisons (15-20 min) - Exhaustif
-                """
-            )
-
-        with col2:
-            import multiprocessing as mp
-            # IMPORTANT: Limiter a 2 workers par defaut pour eviter crash memoire
-            recommended_workers = min(2, max(1, mp.cpu_count() - 2))
-            grid_workers = st.number_input(
-                "Workers parallèles",
-                min_value=1,
-                max_value=20,
-                value=recommended_workers,
-                help="Nombre de coeur de processeur lors du calcul"
-            )
-
-        with col3:
-            if grid_mode == "advanced":
-                early_stop = st.checkbox(
-                    "Early Stopping",
-                    value=True,
-                    help="Skip combinaisons peu prometteuses (gain 10-15% temps)"
-                )
-            else:
-                early_stop = False
-
-        # Afficher info sur le mode sélectionné
-        if grid_mode == "fast":
-            st.info("🚀 **Mode FAST** : Test des 3 presets (Conservative/Default/Aggressive) avec paramètres de base. Idéal pour screening initial.")
-        elif grid_mode == "standard":
-            st.info("⭐ **Mode STANDARD** : Exploration équilibrée des filtres ICT v2.1.1. Recommandé pour optimisation production.")
-        else:
-            st.info("🔬 **Mode ADVANCED** : Exploration exhaustive de tous les paramètres. Pour R&D et maximisation performance.")
-
-        st.markdown("---")
+        st.subheader("⚙️ Configuration du Test")
 
         col_grid1, col_grid2, col_grid3 = st.columns(3)
 
@@ -1501,110 +1480,240 @@ with tab5:
                 st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
 
         # Afficher le nombre de combinaisons a tester
-        if grid_mode == "fast":
-            total_combinations = 864
-        elif grid_mode == "standard":
-            total_combinations = 2592
-        else:
-            total_combinations = 20736
+        try:
+            total_combinations = len(generate_all_combinations())
+            st.metric("🔢 Nombre de combinaisons a tester", f"{total_combinations}")
+        except:
+            st.metric("🔢 Nombre de combinaisons a tester", "~500")
 
-        st.metric("🔢 Nombre de combinaisons à tester", f"{total_combinations}")
+        # Section: Workers
+        col_worker1, col_worker2 = st.columns(2)
+
+        with col_worker1:
+            import multiprocessing as mp
+            # IMPORTANT: Limiter a 2 workers par defaut pour eviter crash memoire
+            recommended_workers = min(2, max(1, mp.cpu_count() - 2))
+            grid_workers = st.slider(
+                "Nombre de workers paralleles",
+                min_value=1,
+                max_value=mp.cpu_count(),
+                value=recommended_workers,
+                key="grid_workers",
+                help=f"⚠️ IMPORTANT: ne mettez ppas tout vos workers, cela peut faire planter votre pc. Votre système a {mp.cpu_count()} CPU mais chaque worker charge les données MT5 en RAM."
+            )
+
+            if grid_workers > 10:
+                st.warning(f"⚠️ Attention: plus de {mp.cpu_count()-5} workers peut faire crasher votre pc si votre RAM insuffisante!")
+
+        with col_worker2:
+            # Estimation du temps basée sur le nombre de barres
+            # Plus de barres = backtest plus long
+            if grid_bars < 2000:
+                sec_per_test = 5
+            elif grid_bars < 10000:
+                sec_per_test = 10
+            else:
+                sec_per_test = 15
+
+            estimated_minutes = (total_combinations * sec_per_test) / grid_workers / 60
+
+            if estimated_minutes < 60:
+                st.metric("⏱️ Temps estimé", f"{estimated_minutes:.0f} min")
+            else:
+                hours = estimated_minutes / 60
+                st.metric("⏱️ Temps estimé", f"{hours:.1f} heures")
+
+            if grid_workers == 1:
+                st.caption("✅ Mode séquentiel (le plus stable)")
+            else:
+                st.caption(f"⚡ {grid_workers} tests simultanés")
 
         st.markdown("---")
 
         # Bouton de lancement
-        if st.button("🚀 Lancer Grid Search", type="primary"):
-            with st.spinner(f"⏳ Grid search en cours (mode {grid_mode.upper()})..."):
-                cmd = [
-                    "python", "grid_search_engine_batch.py",
-                    grid_symbol, grid_timeframe, str(grid_bars),
-                    str(grid_workers), "10",  # batch_size
-                    "--grid", grid_mode
-                ]
+        col_btn1, col_btn2 = st.columns([1, 3])
 
-                if early_stop and grid_mode == "advanced":
-                    cmd.append("--early-stop")
+        with col_btn1:
+            start_grid = st.button(
+                "🚀 Lancer Grid Testing",
+                type="primary",
+                use_container_width=True,
+                key="start_grid_button"
+            )
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
+        # Lancer le grid search
+        if start_grid:
+            st.info(f"🚀 Lancement du Grid Testing avec {grid_workers} workers...")
 
-                if result.returncode == 0:
-                    st.success(f"✅ Grid search terminé ({grid_mode.upper()} mode)")
-                    # Afficher le fichier de résultats
-                    grid_files = sorted(glob.glob(f"Grid/grid_results_*_{grid_mode}_*.json"))
-                    if grid_files:
-                        latest = grid_files[-1]
-                        st.markdown(f"📁 **Résultats** : `{latest}`")
-                else:
-                    st.error("❌ Erreur lors du grid search")
-                    st.code(result.stderr)
+            # Creer le dossier Grid/ s'il n'existe pas
+            os.makedirs('Grid', exist_ok=True)
+
+            # Barre de progression
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            # Callback de progression
+            def update_progress(completed, total):
+                progress = completed / total
+                progress_bar.progress(progress)
+                status_text.text(f"Progression: {completed}/{total} tests completes ({progress*100:.1f}%)")
+
+            try:
+                # Lancer le grid search
+                with st.spinner("Execution des tests en cours..."):
+                    # Lancer le grid search optimisé
+                    results = run_grid_search(
+                        symbol=grid_symbol,
+                        timeframe=grid_timeframe,
+                        bars=grid_bars,
+                        max_workers=grid_workers,
+                        batch_size=10,  # Optimal pour la plupart des cas
+                        callback=update_progress
+                    )
+
+                # Sauvegarder les resultats
+                report_path = save_top_results(
+                    results=results,
+                    symbol=grid_symbol,
+                    timeframe=grid_timeframe,
+                    bars=grid_bars,
+                    top_n=5
+                )
+
+                st.success(f"✅ Grid Testing termine! Rapport sauvegarde: {report_path}")
+
+                # Afficher les top 5 resultats
+                st.subheader("🏆 Top 5 Configurations")
+
+                for i, result in enumerate(results[:5], 1):
+                    with st.expander(f"#{i} - Score: {result['composite_score']:.4f}", expanded=(i==1)):
+                        # Metriques principales
+                        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+
+                        with col_m1:
+                            st.metric("PnL", f"{result['pnl_pct']:.2f}%")
+
+                        with col_m2:
+                            st.metric("Win Rate", f"{result['win_rate']:.2f}%")
+
+                        with col_m3:
+                            st.metric("Sharpe", f"{result['sharpe_ratio']:.3f}")
+
+                        with col_m4:
+                            st.metric("Max DD", f"{result['max_drawdown_pct']:.2f}%")
+
+                        with col_m5:
+                            st.metric("Trades", result['total_trades'])
+
+                        # Parametres
+                        st.markdown("**Parametres:**")
+                        params_df = pd.DataFrame([result['params']]).T
+                        params_df.columns = ['Valeur']
+                        st.dataframe(params_df, use_container_width=True)
+
+                        # Bouton pour sauvegarder cette config
+                        col_save1, col_save2 = st.columns([1, 3])
+                        with col_save1:
+                            config_name = st.text_input(
+                                "Nom de la config",
+                                value=f"GridOptim_{i}",
+                                key=f"config_name_{i}"
+                            )
+                        with col_save2:
+                            if st.button(f"💾 Sauvegarder comme nouvelle config", key=f"save_config_{i}"):
+                                # Sauvegarder dans config/
+                                config_path = f"config/{config_name}.json"
+                                try:
+                                    with open(config_path, 'w', encoding='utf-8') as f:
+                                        json.dump(result['params'], f, indent=4)
+                                    st.success(f"✅ Configuration sauvegardee: {config_path}")
+                                except Exception as e:
+                                    st.error(f"❌ Erreur: {e}")
+
+            except Exception as e:
+                st.error(f"❌ Erreur lors du Grid Testing: {e}")
+                st.exception(e)
 
         st.markdown("---")
 
-        # Section: Historique des Grid Tests - AFFICHAGE ENRICHI
-        st.markdown("### 📊 Résultats Grid Search")
+        # Section: Historique des Grid Tests
+        st.subheader("📊 Historique des Grid Tests")
 
-        grid_files = sorted(glob.glob("Grid/grid_results_*.json"), reverse=True)
-        if grid_files:
-            selected_file = st.selectbox("Sélectionner un fichier de résultats", grid_files)
+        grid_dir = 'Grid'
+        if os.path.exists(grid_dir):
+            grid_files = sorted(
+                [os.path.join(grid_dir, f) for f in os.listdir(grid_dir)
+                 if f.startswith('grid_results_') and f.endswith('.json')],
+                reverse=True
+            )
 
-            try:
-                with open(selected_file, 'r') as f:
-                    grid_data = json.load(f)
+            if grid_files:
+                selected_grid = st.selectbox(
+                    "Selectionner un rapport",
+                    grid_files,
+                    format_func=lambda x: os.path.basename(x),
+                    key="select_grid_report"
+                )
 
-                # Métadonnées v2.1.1
-                meta = grid_data.get('metadata', {})
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Mode Grille", meta.get('grid_mode', 'N/A').upper())
-                with col2:
-                    st.metric("Combinaisons", meta.get('total_combinations', 'N/A'))
-                with col3:
-                    st.metric("Win Rate Moyen", f"{meta.get('average_winrate', 0):.1f}%")
-                with col4:
-                    st.metric("Early Stopping", "✅" if meta.get('early_stopping_enabled') else "❌")
+                try:
+                    with open(selected_grid, 'r', encoding='utf-8') as f:
+                        grid_report = json.load(f)
 
-                # Top 5 configurations
-                st.markdown("#### 🏆 Top 5 Configurations")
-                top_configs = grid_data.get('top_results', [])
+                    # Afficher les metadonnees
+                    metadata = grid_report.get('metadata', {})
+                    col_meta1, col_meta2, col_meta3, col_meta4 = st.columns(4)
 
-                for idx, config in enumerate(top_configs[:5], 1):
-                    with st.expander(f"#{idx} - WR: {config.get('winrate', 0):.1f}% | PnL: ${config.get('pnl', 0):.0f} | DD: {config.get('max_dd', 0):.1f}%"):
-                        col1, col2 = st.columns(2)
+                    with col_meta1:
+                        st.metric("Symbole", metadata.get('symbol', 'N/A'))
 
-                        with col1:
-                            st.markdown("**Métriques**")
-                            st.write(f"- Trades : {config.get('trades', 0)}")
-                            st.write(f"- Win Rate : {config.get('winrate', 0):.1f}%")
-                            st.write(f"- PnL : ${config.get('pnl', 0):.2f}")
-                            st.write(f"- Max DD : {config.get('max_dd', 0):.1f}%")
+                    with col_meta2:
+                        st.metric("Timeframe", metadata.get('timeframe', 'N/A'))
 
-                        with col2:
-                            st.markdown("**Paramètres Clés**")
-                            params = config.get('params', {})
-                            st.write(f"- Risk/Trade : {params.get('RISK_PER_TRADE', 'N/A')}")
-                            st.write(f"- RR : {params.get('RR_TAKE_PROFIT', 'N/A')}")
-                            st.write(f"- ML Threshold : {params.get('ML_THRESHOLD', 'N/A')}")
+                    with col_meta3:
+                        st.metric("Barres", metadata.get('bars', 'N/A'))
 
-                            # v2.1.1 params
-                            if 'USE_FVG_MITIGATION_FILTER' in params:
-                                st.markdown("**Filtres ICT v2.1.1**")
-                                st.write(f"- FVG Mitigation : {'✅' if params.get('USE_FVG_MITIGATION_FILTER') else '❌'}")
-                                st.write(f"- Market Structure : {'✅' if params.get('USE_MARKET_STRUCTURE_FILTER') else '❌'}")
-                                st.write(f"- BOS Max Age : {params.get('BOS_MAX_AGE', 'N/A')}")
+                    with col_meta4:
+                        st.metric("Tests", metadata.get('total_tests', 'N/A'))
 
-                        # Bouton pour copier la config
-                        if st.button(f"📋 Copier config #{idx}", key=f"copy_{idx}_{selected_file}"):
-                            config_json = json.dumps(params, indent=2)
-                            st.code(config_json, language="json")
-                            st.info("Copiez ce JSON dans un fichier config/{nom}.json")
+                    st.caption(f"Date: {metadata.get('date', 'N/A')}")
 
-            except Exception as e:
-                st.error(f"Erreur lors du chargement : {e}")
+                    st.markdown("---")
+
+                    # Afficher le top 5 sauvegarde
+                    st.markdown("**🏆 Top 5 Configurations:**")
+
+                    top_configs = grid_report.get('top_configs', [])
+
+                    # Creer un tableau resume
+                    summary_data = []
+                    for i, config in enumerate(top_configs, 1):
+                        summary_data.append({
+                            'Rang': f"#{i}",
+                            'Score': f"{config['composite_score']:.4f}",
+                            'PnL (%)': f"{config['pnl_pct']:.2f}",
+                            'Win Rate (%)': f"{config['win_rate']:.2f}",
+                            'Sharpe': f"{config['sharpe_ratio']:.3f}",
+                            'Max DD (%)': f"{config['max_drawdown_pct']:.2f}",
+                            'Trades': config['total_trades']
+                        })
+
+                    summary_df = pd.DataFrame(summary_data)
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                    # Details de chaque config
+                    for i, config in enumerate(top_configs, 1):
+                        with st.expander(f"Details #{i}"):
+                            params_df = pd.DataFrame([config['params']]).T
+                            params_df.columns = ['Valeur']
+                            st.dataframe(params_df, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"❌ Erreur lors du chargement: {e}")
+            else:
+                st.info("Aucun rapport de Grid Testing disponible")
         else:
-            st.warning("Aucun résultat de grid search trouvé. Lancez un grid search d'abord.")
-
+            st.info("Aucun rapport de Grid Testing disponible")
 
 # Footer
 st.markdown("---")
-st.markdown("🤖 **ICT Trading Bot Manager v2.1.1** - Interface Avancee avec Suivi Temps Reel")
-st.caption("✨ Nouveau v2.1.1 : 3 presets optimisés (Conservative/Default/Aggressive), Grid search 3 modes (FAST/STANDARD/ADVANCED), Early stopping")
+st.markdown("🤖 **ICT Trading Bot Manager v2.0** - Interface Avancee avec Suivi Temps Reel")
