@@ -778,10 +778,11 @@ def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
             if not (bot <= px <= top):
                 continue
 
-            # v2.0: Find nearest bullish BOS (search backwards from current idx)
+            # v2.0: Find nearest bullish BOS (search backwards from idx-1)
+            # BUGFIX: Search from idx-1, not idx (current bar may not have BOS yet)
             nearest_bos_idx = None
             search_start = max(0, idx - BOS_MAX_AGE if USE_BOS_RECENCY_FILTER else idx - 60)
-            for bos_idx in range(idx, search_start - 1, -1):
+            for bos_idx in range(idx - 1, search_start - 1, -1):
                 if bos_up[bos_idx]:
                     nearest_bos_idx = bos_idx
                     break
@@ -820,10 +821,11 @@ def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
             if not (bot <= px <= top):
                 continue
 
-            # v2.0: Find nearest bearish BOS (search backwards from current idx)
+            # v2.0: Find nearest bearish BOS (search backwards from idx-1)
+            # BUGFIX: Search from idx-1, not idx (current bar may not have BOS yet)
             nearest_bos_idx = None
             search_start = max(0, idx - BOS_MAX_AGE if USE_BOS_RECENCY_FILTER else idx - 60)
-            for bos_idx in range(idx, search_start - 1, -1):
+            for bos_idx in range(idx - 1, search_start - 1, -1):
                 if bos_down[bos_idx]:
                     nearest_bos_idx = bos_idx
                     break
@@ -1974,7 +1976,16 @@ def main():
                             "ATR_FVG_MAX_RATIO": ATR_FVG_MAX_RATIO,
                             "USE_CIRCUIT_BREAKER": USE_CIRCUIT_BREAKER,
                             "DAILY_DD_LIMIT": DAILY_DD_LIMIT,
-                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK
+                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK,
+                            "_comment_v2.1": "=== ICT Strategy v2.1 Enhancements ===",
+                            "USE_BOS_RECENCY_FILTER": USE_BOS_RECENCY_FILTER,
+                            "BOS_MAX_AGE": BOS_MAX_AGE,
+                            "USE_FVG_MITIGATION_FILTER": USE_FVG_MITIGATION_FILTER,
+                            "USE_MARKET_STRUCTURE_FILTER": USE_MARKET_STRUCTURE_FILTER,
+                            "FVG_BOS_MAX_DISTANCE": FVG_BOS_MAX_DISTANCE,
+                            "USE_ORDER_BLOCK_SL": USE_ORDER_BLOCK_SL,
+                            "USE_EXTREME_VOLATILITY_FILTER": USE_EXTREME_VOLATILITY_FILTER,
+                            "VOLATILITY_MULTIPLIER_MAX": VOLATILITY_MULTIPLIER_MAX
                         }
                     }
                     with open(filename, 'w', encoding='utf-8') as f:

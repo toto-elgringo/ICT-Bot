@@ -1145,6 +1145,29 @@ with tab3:
 
     st.info(f"ℹ️ Le backtest utilisera la configuration '{bt_config_name}' depuis le dossier config/")
 
+    # Best practices guidance
+    with st.expander("💡 Conseils pour des backtests réussis", expanded=False):
+        st.markdown("""
+**Recommandations par Timeframe:**
+- **M5**: 10,000-20,000 barres (35-70 jours) - Utilise beaucoup de RAM
+- **H1**: 3,000-5,000 barres (4-7 mois) ⭐ **Recommandé** - Bon équilibre
+- **H4**: 1,500-2,000 barres (6-11 mois) ⭐ **Recommandé** - Rapide et stable
+
+**Pourquoi autant de barres ?**
+Le bot trade seulement 6h/jour (Kill Zones: London 8h-11h + NY 14h-17h Paris time).
+Cela représente 25% du temps → il faut 4× plus de données pour avoir assez de trades.
+
+**Si vous obtenez 0 trades:**
+1. Augmentez le nombre de barres (essayez 100,000 pour M5)
+2. Vérifiez que la période contient des Kill Zones
+3. Regardez les statistiques de filtrage v2.1 pour identifier le problème
+
+**Durée d'exécution:**
+- M5 100,000 barres: ~2-5 minutes
+- H1 5,000 barres: ~30-60 secondes
+- H4 2,000 barres: ~20-40 secondes
+        """)
+
     if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
             success, stdout, stderr = run_backtest_with_params(
@@ -1215,9 +1238,30 @@ with tab4:
                 pnl = backtest_data.get('pnl', 0)
                 max_dd = backtest_data.get('max_dd', 0)
 
+            # Check for 0 trades and display helpful warning
+            if trades == 0:
+                st.error("⚠️ AUCUN TRADE GENERE")
+                st.warning("""
+**Causes possibles:**
+1. **Pas assez de barres** - Le bot trade seulement 6h/jour (Kill Zones)
+   - Recommandé: 10,000+ barres pour M5, 3,000+ pour H1, 1,500+ pour H4
+2. **Filtres v2.1 trop stricts** - Consultez les statistiques de filtrage ci-dessous
+   - Essayez d'augmenter `BOS_MAX_AGE` de 20 à 30 barres
+   - Ou désactivez temporairement `USE_MARKET_STRUCTURE_FILTER`
+3. **Période sans Kill Zones** - Bot ne trade que pendant London (8h-11h) et NY (14h-17h) Paris time
+
+**Solutions:**
+- Augmentez le nombre de barres (utilisez 100,000+ pour M5)
+- Utilisez H1 ou H4 au lieu de M5 pour des backtests plus rapides
+- Relâchez les filtres v2.1 dans l'onglet Paramètres
+- Vérifiez que la période testée contient des sessions de trading
+
+📊 Consultez les **Statistiques de Filtrage v2.1** ci-dessous pour identifier où les signaux sont bloqués.
+                """)
+
             col_h1, col_h2, col_h3, col_h4 = st.columns(4)
             with col_h1:
-                st.metric("Trades", trades)
+                st.metric("Trades", trades, delta="⚠️ Trop peu" if trades < 10 else None)
             with col_h2:
                 st.metric("Win Rate", f"{winrate:.2f}%")
             with col_h3:
@@ -1422,10 +1466,35 @@ with tab5:
         st.success("🚀 Grid Search Optimisé (25-35x speedup)")
 
         st.info(
-            "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
-            "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)\n\n"
-            "**v2.0**: Utilise 12 features ML (vs 5 en v1.0) pour meilleure analyse de marché"
+            "🎯 **Fonctionnement**: Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)\n\n"
+            "**v2.1**: Utilise 12 features ML (vs 5 en v1.0) pour meilleure analyse de marché"
         )
+
+        # Section: Mode Selection
+        st.subheader("🎯 Mode de Recherche")
+
+        col_mode1, col_mode2 = st.columns(2)
+
+        with col_mode1:
+            grid_mode = st.radio(
+                "Sélectionnez le mode",
+                options=['standard', 'advanced'],
+                index=0,
+                key="grid_mode",
+                help="Standard: 1,728 tests (~4-6 min) | Advanced: 46,656 tests (~2-3h)"
+            )
+
+        with col_mode2:
+            if grid_mode == 'standard':
+                st.metric("Combinaisons", "1,728")
+                st.caption("✅ Mode rapide (recommandé pour débuter)")
+                st.caption("Paramètres: Risk, RR, Max Trades, Cooldown, ML Threshold, Session RR, ATR Filter")
+            else:
+                st.metric("Combinaisons", "46,656")
+                st.caption("⚡ Mode avancé (v2.1 ICT)")
+                st.caption("Ajoute: BOS_MAX_AGE (3 valeurs), FVG_BOS_MAX_DISTANCE (3), VOLATILITY_MULTIPLIER_MAX (3)")
+
+        st.markdown("---")
 
         # Section: Configuration du test
         st.subheader("⚙️ Configuration du Test")
@@ -1479,12 +1548,15 @@ with tab5:
                 days = grid_bars
                 st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
 
-        # Afficher le nombre de combinaisons a tester
+        # Afficher le nombre de combinaisons a tester (updated dynamically with mode)
         try:
-            total_combinations = len(generate_all_combinations())
-            st.metric("🔢 Nombre de combinaisons a tester", f"{total_combinations}")
-        except:
-            st.metric("🔢 Nombre de combinaisons a tester", "~500")
+            total_combinations = len(generate_all_combinations(mode=grid_mode))
+            # Formatting with thousands separator
+            st.metric("🔢 Nombre de combinaisons", f"{total_combinations:,}".replace(',', ' '))
+        except Exception as e:
+            # Fallback based on mode
+            fallback = "1,728" if grid_mode == 'standard' else "46,656"
+            st.metric("🔢 Nombre de combinaisons", fallback)
 
         # Section: Workers
         col_worker1, col_worker2 = st.columns(2)
@@ -1530,6 +1602,32 @@ with tab5:
 
         st.markdown("---")
 
+        # Best practices for grid search
+        with st.expander("💡 Conseils pour Grid Search", expanded=False):
+            st.markdown(f"""
+**Mode sélectionné: {grid_mode.upper()}**
+- **Standard**: 1,728 tests (~4-6 min avec 2 workers)
+- **Advanced**: 46,656 tests (~2-3 heures avec 2 workers)
+
+**Recommandations:**
+1. **Commencez par Standard** pour tester rapidement
+2. **Utilisez H1 ou H4** pour des résultats plus rapides que M5
+3. **Limitez à 2-4 workers** pour éviter les crashs mémoire
+4. **Bars recommandées**:
+   - M5: 10,000-20,000 (mais tests lents)
+   - H1: 2,000-5,000 ⭐ Recommandé
+   - H4: 1,000-2,000 ⭐ Recommandé
+
+**Durée estimée (Mode {grid_mode.upper()}):**
+- 2 workers: {estimated_minutes:.0f} min
+- 4 workers: {estimated_minutes/2:.0f} min (risque crash si RAM < 16 GB)
+
+**Après les tests:**
+Vous pouvez sauvegarder les meilleures configs comme nouvelles configurations réutilisables.
+            """)
+
+        st.markdown("---")
+
         # Bouton de lancement
         col_btn1, col_btn2 = st.columns([1, 3])
 
@@ -1560,14 +1658,15 @@ with tab5:
 
             try:
                 # Lancer le grid search
-                with st.spinner("Execution des tests en cours..."):
-                    # Lancer le grid search optimisé
+                with st.spinner(f"Execution des tests en cours (Mode: {grid_mode.upper()})..."):
+                    # Lancer le grid search optimisé avec le mode sélectionné
                     results = run_grid_search(
                         symbol=grid_symbol,
                         timeframe=grid_timeframe,
                         bars=grid_bars,
                         max_workers=grid_workers,
                         batch_size=10,  # Optimal pour la plupart des cas
+                        mode=grid_mode,  # CRITICAL: Pass the mode parameter!
                         callback=update_progress
                     )
 
