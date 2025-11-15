@@ -70,16 +70,7 @@ def create_default_config():
             'ATR_FVG_MAX_RATIO': 2.5,
             'USE_CIRCUIT_BREAKER': True,
             'DAILY_DD_LIMIT': 0.03,
-            'USE_ADAPTIVE_RISK': True,
-            # v2.0 ICT Strategy Enhancements
-            'USE_BOS_RECENCY_FILTER': True,
-            'BOS_MAX_AGE': 20,
-            'USE_FVG_MITIGATION_FILTER': True,
-            'USE_MARKET_STRUCTURE_FILTER': True,
-            'FVG_BOS_MAX_DISTANCE': 20,
-            'USE_ORDER_BLOCK_SL': True,
-            'USE_EXTREME_VOLATILITY_FILTER': True,
-            'VOLATILITY_MULTIPLIER_MAX': 3.0
+            'USE_ADAPTIVE_RISK': True
         }
         with open(default_config_path, 'w') as f:
             json.dump(default_config, f, indent=4)
@@ -419,15 +410,6 @@ if 'config' not in st.session_state:
         'USE_CIRCUIT_BREAKER': True,
         'DAILY_DD_LIMIT': 0.03,
         'USE_ADAPTIVE_RISK': True,
-        # v2.0 ICT Strategy Enhancements
-        'USE_BOS_RECENCY_FILTER': True,
-        'BOS_MAX_AGE': 20,
-        'USE_FVG_MITIGATION_FILTER': True,
-        'USE_MARKET_STRUCTURE_FILTER': True,
-        'FVG_BOS_MAX_DISTANCE': 20,
-        'USE_ORDER_BLOCK_SL': True,
-        'USE_EXTREME_VOLATILITY_FILTER': True,
-        'VOLATILITY_MULTIPLIER_MAX': 3.0,
         'SYMBOL': 'EURUSD',
         'TIMEFRAME': 'M5'
     }
@@ -437,41 +419,6 @@ if 'config' not in st.session_state:
 # ===============================
 st.title("🤖 ICT Trading Bot Manager v2.0")
 st.markdown("### Centre de Controle Avance avec Suivi Temps Reel")
-
-# ===============================
-# V2.0 MIGRATION WARNING BANNER
-# ===============================
-with st.expander("⚠️ ICT Bot v2.0 - Breaking Change - LIRE AVANT UTILISATION", expanded=False):
-    st.warning("""
-**La stratégie a été mise à niveau vers v2.0 avec 12 features ML (vs 5 en v1.0).**
-
-### Action Requise
-Supprimez tous les fichiers `.pkl` dans le dossier `machineLearning/` avant de relancer les bots existants.
-
-**Pourquoi ?** Les modèles ML v1.0 sont incompatibles avec v2.0 (5 features → 12 features).
-
-### Nouvelles Fonctionnalités v2.0
-- ✅ **Validation de récence des BOS** - Seuls les BOS récents (< 20 barres) sont utilisés
-- ✅ **Tracking de mitigation des FVG** - Ignore les FVG déjà touchés par le prix
-- ✅ **Détection de structure de marché** - Valide HH/HL (haussier) ou LL/LH (baissier)
-- ✅ **Confluence temporelle stricte** - FVG et BOS doivent être < 20 barres de distance
-- ✅ **Order Blocks pour Stop Loss** - Utilise les Order Blocks au lieu des swing points
-- ✅ **Filtre de volatilité extrême** - Protection contre les news (ATR > 3× médiane)
-
-### Résultats v2.0 (EURUSD M5, 14.5 mois)
-- 📈 Win Rate: **59-63%** (+10% vs v1.0)
-- 📉 Max Drawdown: **-8% à -10%** (-7% amélioration vs v1.0)
-- 📊 Trades: **170-210** (-35% volume - qualité > quantité)
-- 🎯 12 features ML pour meilleure détection de marché
-
-### Migration
-1. Arrêtez tous les bots
-2. Supprimez `machineLearning/*.pkl` (Windows: `del machineLearning\\*.pkl` | Linux/Mac: `rm machineLearning/*.pkl`)
-3. Redémarrez les bots (les modèles ML se recréeront automatiquement)
-""")
-
-    st.info("💡 **Astuce**: Les nouveaux paramètres v2.0 sont dans l'onglet 'Paramètres' → Section 'Filtres ICT v2.0'")
-
 st.markdown("---")
 
 # ===============================
@@ -892,10 +839,10 @@ with tab2:
                         "Risque par trade (%)", 0.001, 0.05, config.get('RISK_PER_TRADE', 0.01), 0.001, format="%.3f", key=f"risk_{config_name}"
                     )
                     config['RR_TAKE_PROFIT'] = st.slider(
-                        "Risk/Reward", 1.0, 3.0, config.get('RR_TAKE_PROFIT', 2.0), 0.1, key=f"rr_{config_name}"
+                        "Risk/Reward", 1.0, 50.0, config.get('RR_TAKE_PROFIT', 2.0), 0.1, key=f"rr_{config_name}"
                     )
                     config['MAX_CONCURRENT_TRADES'] = st.slider(
-                        "Max trades", 1, 5, config.get('MAX_CONCURRENT_TRADES', 1), key=f"max_trades_{config_name}"
+                        "Max trades", 1, 50, config.get('MAX_CONCURRENT_TRADES', 1), key=f"max_trades_{config_name}"
                     )
                     config['COOLDOWN_BARS'] = st.slider(
                         "Cooldown", 1, 20, config.get('COOLDOWN_BARS', 5), key=f"cooldown_{config_name}"
@@ -953,81 +900,6 @@ with tab2:
                         "Risque Adaptatif", config.get('USE_ADAPTIVE_RISK', False), key=f"adapt_risk_{config_name}"
                     )
 
-                # ===============================
-                # v2.0 ICT FILTERS SECTION
-                # ===============================
-                st.markdown("---")
-                st.subheader("🎯 Filtres ICT v2.0 (Nouveaux)")
-
-                col_v20_1, col_v20_2, col_v20_3 = st.columns(3)
-
-                with col_v20_1:
-                    st.markdown("**Filtrage BOS & FVG**")
-                    config['USE_BOS_RECENCY_FILTER'] = st.checkbox(
-                        "Filtre récence BOS",
-                        config.get('USE_BOS_RECENCY_FILTER', True),
-                        key=f"bos_recency_{config_name}",
-                        help="N'utiliser que les BOS des N dernières barres"
-                    )
-                    if config['USE_BOS_RECENCY_FILTER']:
-                        config['BOS_MAX_AGE'] = st.slider(
-                            "Age max BOS (barres)",
-                            10, 50,
-                            config.get('BOS_MAX_AGE', 20),
-                            key=f"bos_age_{config_name}",
-                            help="Seuls les BOS des N dernières barres sont valides"
-                        )
-
-                    config['USE_FVG_MITIGATION_FILTER'] = st.checkbox(
-                        "Mitigation FVG",
-                        config.get('USE_FVG_MITIGATION_FILTER', True),
-                        key=f"fvg_mitigation_{config_name}",
-                        help="Ignorer les FVG déjà touchés par le prix"
-                    )
-
-                with col_v20_2:
-                    st.markdown("**Structure & Confluence**")
-                    config['USE_MARKET_STRUCTURE_FILTER'] = st.checkbox(
-                        "Structure de marché",
-                        config.get('USE_MARKET_STRUCTURE_FILTER', True),
-                        key=f"market_struct_{config_name}",
-                        help="Valider la structure HH/HL (haussier) ou LL/LH (baissier)"
-                    )
-
-                    config['FVG_BOS_MAX_DISTANCE'] = st.slider(
-                        "Distance FVG-BOS max",
-                        10, 50,
-                        config.get('FVG_BOS_MAX_DISTANCE', 20),
-                        key=f"fvg_bos_dist_{config_name}",
-                        help="Distance maximale (barres) entre FVG et BOS pour confluence"
-                    )
-
-                    config['USE_ORDER_BLOCK_SL'] = st.checkbox(
-                        "Order Block SL",
-                        config.get('USE_ORDER_BLOCK_SL', True),
-                        key=f"ob_sl_{config_name}",
-                        help="Utiliser Order Blocks pour Stop Loss (vs swing points)"
-                    )
-
-                with col_v20_3:
-                    st.markdown("**Protection Volatilité**")
-                    config['USE_EXTREME_VOLATILITY_FILTER'] = st.checkbox(
-                        "Filtre volatilité extrême",
-                        config.get('USE_EXTREME_VOLATILITY_FILTER', True),
-                        key=f"vol_filter_{config_name}",
-                        help="Ignorer trades si ATR > N × médiane ATR (protection news)"
-                    )
-                    if config['USE_EXTREME_VOLATILITY_FILTER']:
-                        config['VOLATILITY_MULTIPLIER_MAX'] = st.slider(
-                            "Multiplicateur max ATR",
-                            2.0, 5.0,
-                            config.get('VOLATILITY_MULTIPLIER_MAX', 3.0),
-                            0.5,
-                            key=f"vol_mult_{config_name}",
-                            help="Rejeter si ATR actuel > N × médiane ATR (défaut: 3.0)"
-                        )
-
-                st.markdown("---")
                 col_save, col_cancel = st.columns(2)
                 with col_save:
                     if st.button("💾 Sauvegarder", type="primary", use_container_width=True, key=f"save_config_{config_name}"):
@@ -1056,19 +928,6 @@ with tab2:
                 with col_info3:
                     st.metric("ATR Filter", "✅" if config.get('USE_ATR_FILTER', False) else "❌")
                     st.metric("Circuit Breaker", "✅" if config.get('USE_CIRCUIT_BREAKER', False) else "❌")
-
-                # Afficher les paramètres v2.0
-                st.markdown("**🎯 Filtres ICT v2.0:**")
-                col_v20_display1, col_v20_display2, col_v20_display3 = st.columns(3)
-                with col_v20_display1:
-                    st.caption(f"BOS Recency: {'✅' if config.get('USE_BOS_RECENCY_FILTER', True) else '❌'} (max {config.get('BOS_MAX_AGE', 20)} barres)")
-                    st.caption(f"FVG Mitigation: {'✅' if config.get('USE_FVG_MITIGATION_FILTER', True) else '❌'}")
-                with col_v20_display2:
-                    st.caption(f"Market Structure: {'✅' if config.get('USE_MARKET_STRUCTURE_FILTER', True) else '❌'}")
-                    st.caption(f"FVG-BOS Distance: max {config.get('FVG_BOS_MAX_DISTANCE', 20)} barres")
-                with col_v20_display3:
-                    st.caption(f"Order Block SL: {'✅' if config.get('USE_ORDER_BLOCK_SL', True) else '❌'}")
-                    st.caption(f"Vol. Filter: {'✅' if config.get('USE_EXTREME_VOLATILITY_FILTER', True) else '❌'} (×{config.get('VOLATILITY_MULTIPLIER_MAX', 3.0)})")
 
                 # Bots utilisant cette config
                 if bots_using:
@@ -1145,29 +1004,6 @@ with tab3:
 
     st.info(f"ℹ️ Le backtest utilisera la configuration '{bt_config_name}' depuis le dossier config/")
 
-    # Best practices guidance
-    with st.expander("💡 Conseils pour des backtests réussis", expanded=False):
-        st.markdown("""
-**Recommandations par Timeframe:**
-- **M5**: 10,000-20,000 barres (35-70 jours) - Utilise beaucoup de RAM
-- **H1**: 3,000-5,000 barres (4-7 mois) ⭐ **Recommandé** - Bon équilibre
-- **H4**: 1,500-2,000 barres (6-11 mois) ⭐ **Recommandé** - Rapide et stable
-
-**Pourquoi autant de barres ?**
-Le bot trade seulement 6h/jour (Kill Zones: London 8h-11h + NY 14h-17h Paris time).
-Cela représente 25% du temps → il faut 4× plus de données pour avoir assez de trades.
-
-**Si vous obtenez 0 trades:**
-1. Augmentez le nombre de barres (essayez 100,000 pour M5)
-2. Vérifiez que la période contient des Kill Zones
-3. Regardez les statistiques de filtrage v2.1 pour identifier le problème
-
-**Durée d'exécution:**
-- M5 100,000 barres: ~2-5 minutes
-- H1 5,000 barres: ~30-60 secondes
-- H4 2,000 barres: ~20-40 secondes
-        """)
-
     if st.button("🚀 Lancer le Backtest", type="primary", use_container_width=True, key="launch_backtest_button"):
         with st.spinner("Backtest en cours... Cela peut prendre quelques minutes..."):
             success, stdout, stderr = run_backtest_with_params(
@@ -1238,104 +1074,15 @@ with tab4:
                 pnl = backtest_data.get('pnl', 0)
                 max_dd = backtest_data.get('max_dd', 0)
 
-            # Check for 0 trades and display helpful warning
-            if trades == 0:
-                st.error("⚠️ AUCUN TRADE GENERE")
-                st.warning("""
-**Causes possibles:**
-1. **Pas assez de barres** - Le bot trade seulement 6h/jour (Kill Zones)
-   - Recommandé: 10,000+ barres pour M5, 3,000+ pour H1, 1,500+ pour H4
-2. **Filtres v2.1 trop stricts** - Consultez les statistiques de filtrage ci-dessous
-   - Essayez d'augmenter `BOS_MAX_AGE` de 20 à 30 barres
-   - Ou désactivez temporairement `USE_MARKET_STRUCTURE_FILTER`
-3. **Période sans Kill Zones** - Bot ne trade que pendant London (8h-11h) et NY (14h-17h) Paris time
-
-**Solutions:**
-- Augmentez le nombre de barres (utilisez 100,000+ pour M5)
-- Utilisez H1 ou H4 au lieu de M5 pour des backtests plus rapides
-- Relâchez les filtres v2.1 dans l'onglet Paramètres
-- Vérifiez que la période testée contient des sessions de trading
-
-📊 Consultez les **Statistiques de Filtrage v2.1** ci-dessous pour identifier où les signaux sont bloqués.
-                """)
-
             col_h1, col_h2, col_h3, col_h4 = st.columns(4)
             with col_h1:
-                st.metric("Trades", trades, delta="⚠️ Trop peu" if trades < 10 else None)
+                st.metric("Trades", trades)
             with col_h2:
                 st.metric("Win Rate", f"{winrate:.2f}%")
             with col_h3:
                 st.metric("PnL", f"${pnl:,.2f}")
             with col_h4:
                 st.metric("Max DD", f"{max_dd:.2f}%")
-
-            # Afficher les statistiques v2.0 si disponibles
-            if 'statistics' in backtest_data:
-                stats = backtest_data['statistics']
-
-                # Vérifier si des stats v2.0 existent
-                has_v20_stats = any(key in stats for key in [
-                    'fvg_mitigated_filtered', 'bos_too_old_filtered',
-                    'fvg_bos_too_far_filtered', 'market_structure_filtered',
-                    'extreme_volatility_filtered'
-                ])
-
-                if has_v20_stats:
-                    st.markdown("---")
-                    st.subheader("📊 Statistiques de Filtrage v2.0")
-
-                    col_v20_s1, col_v20_s2, col_v20_s3, col_v20_s4, col_v20_s5 = st.columns(5)
-
-                    with col_v20_s1:
-                        fvg_mitigated = stats.get('fvg_mitigated_filtered', 0)
-                        st.metric(
-                            "FVG Mitigés",
-                            fvg_mitigated,
-                            help="FVG déjà touchés par le prix (ignorés)"
-                        )
-
-                    with col_v20_s2:
-                        bos_old = stats.get('bos_too_old_filtered', 0)
-                        st.metric(
-                            "BOS Trop Anciens",
-                            bos_old,
-                            help="BOS de plus de BOS_MAX_AGE barres (ignorés)"
-                        )
-
-                    with col_v20_s3:
-                        fvg_bos_far = stats.get('fvg_bos_too_far_filtered', 0)
-                        st.metric(
-                            "FVG-BOS Éloignés",
-                            fvg_bos_far,
-                            help="Distance FVG-BOS > FVG_BOS_MAX_DISTANCE barres"
-                        )
-
-                    with col_v20_s4:
-                        market_struct = stats.get('market_structure_filtered', 0)
-                        st.metric(
-                            "Structure Invalide",
-                            market_struct,
-                            help="Structure de marché non conforme (HH/HL ou LL/LH)"
-                        )
-
-                    with col_v20_s5:
-                        extreme_vol = stats.get('extreme_volatility_filtered', 0)
-                        st.metric(
-                            "Volatilité Extrême",
-                            extreme_vol,
-                            help="ATR > VOLATILITY_MULTIPLIER_MAX × médiane"
-                        )
-
-                    # Calculer le total de filtres v2.0
-                    total_v20_filtered = (fvg_mitigated + bos_old + fvg_bos_far +
-                                         market_struct + extreme_vol)
-
-                    if total_v20_filtered > 0:
-                        st.info(f"🎯 Total filtrés par v2.0: **{total_v20_filtered}** signaux rejetés (amélioration qualité)")
-                    else:
-                        st.caption("Aucun signal filtré par les filtres v2.0 sur cette période")
-
-                    st.markdown("---")
         except json.JSONDecodeError:
             st.error(f"Erreur: Le fichier {selected_bt} est vide ou corrompu")
             st.warning("Ce fichier de backtest n'est pas valide. Lancez un nouveau backtest.")
@@ -1466,35 +1213,9 @@ with tab5:
         st.success("🚀 Grid Search Optimisé (25-35x speedup)")
 
         st.info(
-            "🎯 **Fonctionnement**: Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)\n\n"
-            "**v2.1**: Utilise 12 features ML (vs 5 en v1.0) pour meilleure analyse de marché"
+            "🎯 **Fonctionnement**: Teste 1,728 combinaisons de 7 paramètres. "
+            "Score = 40% PnL + 30% Sharpe + 20% WinRate + 10% (1-DD)"
         )
-
-        # Section: Mode Selection
-        st.subheader("🎯 Mode de Recherche")
-
-        col_mode1, col_mode2 = st.columns(2)
-
-        with col_mode1:
-            grid_mode = st.radio(
-                "Sélectionnez le mode",
-                options=['standard', 'advanced'],
-                index=0,
-                key="grid_mode",
-                help="Standard: 1,728 tests (~4-6 min) | Advanced: 46,656 tests (~2-3h)"
-            )
-
-        with col_mode2:
-            if grid_mode == 'standard':
-                st.metric("Combinaisons", "1,728")
-                st.caption("✅ Mode rapide (recommandé pour débuter)")
-                st.caption("Paramètres: Risk, RR, Max Trades, Cooldown, ML Threshold, Session RR, ATR Filter")
-            else:
-                st.metric("Combinaisons", "46,656")
-                st.caption("⚡ Mode avancé (v2.1 ICT)")
-                st.caption("Ajoute: BOS_MAX_AGE (3 valeurs), FVG_BOS_MAX_DISTANCE (3), VOLATILITY_MULTIPLIER_MAX (3)")
-
-        st.markdown("---")
 
         # Section: Configuration du test
         st.subheader("⚙️ Configuration du Test")
@@ -1548,15 +1269,12 @@ with tab5:
                 days = grid_bars
                 st.caption(f"📅 ≈ {days:.0f} jours ({days/30:.1f} mois)")
 
-        # Afficher le nombre de combinaisons a tester (updated dynamically with mode)
+        # Afficher le nombre de combinaisons a tester
         try:
-            total_combinations = len(generate_all_combinations(mode=grid_mode))
-            # Formatting with thousands separator
-            st.metric("🔢 Nombre de combinaisons", f"{total_combinations:,}".replace(',', ' '))
-        except Exception as e:
-            # Fallback based on mode
-            fallback = "1,728" if grid_mode == 'standard' else "46,656"
-            st.metric("🔢 Nombre de combinaisons", fallback)
+            total_combinations = len(generate_all_combinations())
+            st.metric("🔢 Nombre de combinaisons a tester", f"{total_combinations}")
+        except:
+            st.metric("🔢 Nombre de combinaisons a tester", "~500")
 
         # Section: Workers
         col_worker1, col_worker2 = st.columns(2)
@@ -1602,32 +1320,6 @@ with tab5:
 
         st.markdown("---")
 
-        # Best practices for grid search
-        with st.expander("💡 Conseils pour Grid Search", expanded=False):
-            st.markdown(f"""
-**Mode sélectionné: {grid_mode.upper()}**
-- **Standard**: 1,728 tests (~4-6 min avec 2 workers)
-- **Advanced**: 46,656 tests (~2-3 heures avec 2 workers)
-
-**Recommandations:**
-1. **Commencez par Standard** pour tester rapidement
-2. **Utilisez H1 ou H4** pour des résultats plus rapides que M5
-3. **Limitez à 2-4 workers** pour éviter les crashs mémoire
-4. **Bars recommandées**:
-   - M5: 10,000-20,000 (mais tests lents)
-   - H1: 2,000-5,000 ⭐ Recommandé
-   - H4: 1,000-2,000 ⭐ Recommandé
-
-**Durée estimée (Mode {grid_mode.upper()}):**
-- 2 workers: {estimated_minutes:.0f} min
-- 4 workers: {estimated_minutes/2:.0f} min (risque crash si RAM < 16 GB)
-
-**Après les tests:**
-Vous pouvez sauvegarder les meilleures configs comme nouvelles configurations réutilisables.
-            """)
-
-        st.markdown("---")
-
         # Bouton de lancement
         col_btn1, col_btn2 = st.columns([1, 3])
 
@@ -1658,15 +1350,14 @@ Vous pouvez sauvegarder les meilleures configs comme nouvelles configurations r�
 
             try:
                 # Lancer le grid search
-                with st.spinner(f"Execution des tests en cours (Mode: {grid_mode.upper()})..."):
-                    # Lancer le grid search optimisé avec le mode sélectionné
+                with st.spinner("Execution des tests en cours..."):
+                    # Lancer le grid search optimisé
                     results = run_grid_search(
                         symbol=grid_symbol,
                         timeframe=grid_timeframe,
                         bars=grid_bars,
                         max_workers=grid_workers,
                         batch_size=10,  # Optimal pour la plupart des cas
-                        mode=grid_mode,  # CRITICAL: Pass the mode parameter!
                         callback=update_progress
                     )
 

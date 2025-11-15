@@ -125,28 +125,7 @@ USE_ADAPTIVE_RISK = True
 RISK_REDUCTION_FACTOR = 0.5
 
 MAGIC_NUMBER = 161803
-COMMENT = "ICTv2"
-
-# === v2.0 STRATEGY ENHANCEMENTS ===
-# BOS Recency & Strength Validation
-USE_BOS_RECENCY_FILTER = True
-BOS_MAX_AGE = 20  # Only use BOS from last N bars
-
-# FVG Mitigation Tracking
-USE_FVG_MITIGATION_FILTER = True
-
-# Market Structure Detection
-USE_MARKET_STRUCTURE_FILTER = True
-
-# Temporal Confluence
-FVG_BOS_MAX_DISTANCE = 20  # FVG and BOS must be within N bars
-
-# Order Block Enhancement
-USE_ORDER_BLOCK_SL = True  # Use Order Blocks for SL placement
-
-# Extreme Volatility Filter
-USE_EXTREME_VOLATILITY_FILTER = True
-VOLATILITY_MULTIPLIER_MAX = 3.0  # Skip trades if ATR > N × median ATR
+COMMENT = "ICTv1"
 
 # Telegram Notifications (chargé depuis telegram_credentials.json)
 TELEGRAM_ENABLED = _telegram_creds.get("enabled", True)
@@ -209,13 +188,6 @@ def load_config_from_file(config_name='Default'):
     global USE_ATR_FILTER, ATR_FVG_MIN_RATIO, ATR_FVG_MAX_RATIO
     global USE_CIRCUIT_BREAKER, DAILY_DD_LIMIT
     global USE_ADAPTIVE_RISK
-    # v2.0 parameters
-    global USE_BOS_RECENCY_FILTER, BOS_MAX_AGE
-    global USE_FVG_MITIGATION_FILTER
-    global USE_MARKET_STRUCTURE_FILTER
-    global FVG_BOS_MAX_DISTANCE
-    global USE_ORDER_BLOCK_SL
-    global USE_EXTREME_VOLATILITY_FILTER, VOLATILITY_MULTIPLIER_MAX
 
     # Construire le chemin vers le fichier de config
     filepath = f'config/{config_name}.json'
@@ -252,22 +224,11 @@ def load_config_from_file(config_name='Default'):
 
         USE_ADAPTIVE_RISK = config.get('USE_ADAPTIVE_RISK', USE_ADAPTIVE_RISK)
 
-        # v2.0 Strategy Enhancements
-        USE_BOS_RECENCY_FILTER = config.get('USE_BOS_RECENCY_FILTER', USE_BOS_RECENCY_FILTER)
-        BOS_MAX_AGE = config.get('BOS_MAX_AGE', BOS_MAX_AGE)
-        USE_FVG_MITIGATION_FILTER = config.get('USE_FVG_MITIGATION_FILTER', USE_FVG_MITIGATION_FILTER)
-        USE_MARKET_STRUCTURE_FILTER = config.get('USE_MARKET_STRUCTURE_FILTER', USE_MARKET_STRUCTURE_FILTER)
-        FVG_BOS_MAX_DISTANCE = config.get('FVG_BOS_MAX_DISTANCE', FVG_BOS_MAX_DISTANCE)
-        USE_ORDER_BLOCK_SL = config.get('USE_ORDER_BLOCK_SL', USE_ORDER_BLOCK_SL)
-        USE_EXTREME_VOLATILITY_FILTER = config.get('USE_EXTREME_VOLATILITY_FILTER', USE_EXTREME_VOLATILITY_FILTER)
-        VOLATILITY_MULTIPLIER_MAX = config.get('VOLATILITY_MULTIPLIER_MAX', VOLATILITY_MULTIPLIER_MAX)
-
         print(f"[CONFIG] Configuration chargee depuis {filepath}")
         print(f"[CONFIG] RISK_PER_TRADE = {RISK_PER_TRADE}")
         print(f"[CONFIG] RR_TAKE_PROFIT = {RR_TAKE_PROFIT}")
         print(f"[CONFIG] MAX_CONCURRENT_TRADES = {MAX_CONCURRENT_TRADES}")
         print(f"[CONFIG] ML_THRESHOLD = {ML_THRESHOLD}")
-        print(f"[CONFIG] v2.0 Filters: BOS_Recency={USE_BOS_RECENCY_FILTER}, FVG_Mitigation={USE_FVG_MITIGATION_FILTER}, Market_Structure={USE_MARKET_STRUCTURE_FILTER}")
 
     except Exception as e:
         print(f"[CONFIG] Erreur lors du chargement de {filepath}: {e}")
@@ -484,233 +445,13 @@ def calculate_atr(df: pd.DataFrame, period=14):
     df['atr'] = atr
     return df
 
-def calculate_bos_strength(df: pd.DataFrame):
-    """
-    v2.0: Calcule la force (strength) de chaque BOS
-
-    La force du BOS est la magnitude de la cassure relative a l'ATR.
-    Un BOS fort indique un mouvement institutionnel significatif.
-
-    Returns:
-        df avec colonnes 'bos_strength' et 'bos_age' ajoutées
-    """
-    n = len(df)
-    bos_up = df['bos_up'].values
-    bos_down = df['bos_down'].values
-    highs = df['high'].values
-    lows = df['low'].values
-    closes = df['close'].values
-    atrs = df['atr'].values
-    swing_high = df['swing_high'].values
-    swing_low = df['swing_low'].values
-
-    bos_strength = np.zeros(n)
-    bos_age = np.full(n, np.nan)
-
-    # Track last swing high/low levels and indices
-    last_sh_level = np.nan
-    last_sl_level = np.nan
-    last_sh_idx = -1
-    last_sl_idx = -1
-
-    for i in range(n):
-        # Update swing levels
-        if swing_high[i]:
-            last_sh_level = highs[i]
-            last_sh_idx = i
-        if swing_low[i]:
-            last_sl_level = lows[i]
-            last_sl_idx = i
-
-        # Calculate BOS strength when BOS occurs
-        if bos_up[i] and not np.isnan(last_sh_level):
-            # Bullish BOS - price broke above last swing high
-            break_magnitude = closes[i] - last_sh_level
-            if atrs[i] > 0:
-                bos_strength[i] = break_magnitude / atrs[i]
-            else:
-                bos_strength[i] = 0.0
-            bos_age[i] = i - last_sh_idx
-
-        elif bos_down[i] and not np.isnan(last_sl_level):
-            # Bearish BOS - price broke below last swing low
-            break_magnitude = last_sl_level - closes[i]
-            if atrs[i] > 0:
-                bos_strength[i] = break_magnitude / atrs[i]
-            else:
-                bos_strength[i] = 0.0
-            bos_age[i] = i - last_sl_idx
-
-    df['bos_strength'] = bos_strength
-    df['bos_age'] = bos_age
-    return df
-
-def detect_market_structure(df: pd.DataFrame, lookback=20):
-    """
-    v2.0: Detecte la structure de marche (HH/HL pour bullish, LL/LH pour bearish)
-
-    Market structure is fundamental to ICT - we only trade when structure confirms direction:
-    - Bullish structure: Series of Higher Highs (HH) and Higher Lows (HL)
-    - Bearish structure: Series of Lower Lows (LL) and Lower Highs (LH)
-    - Ranging: No clear structure
-
-    Args:
-        df: DataFrame with swing_high and swing_low columns
-        lookback: Number of bars to analyze for structure
-
-    Returns:
-        df with 'market_structure' column ('bullish', 'bearish', 'ranging')
-        and 'structure_score' column (numeric strength: +1 to -1)
-    """
-    n = len(df)
-    swing_high = df['swing_high'].values
-    swing_low = df['swing_low'].values
-    highs = df['high'].values
-    lows = df['low'].values
-
-    market_structure = np.array(['ranging'] * n, dtype=object)
-    structure_score = np.zeros(n)
-
-    for i in range(lookback, n):
-        # Get swing points in lookback window
-        window_start = max(0, i - lookback)
-
-        # Find swing highs in window
-        sh_indices = [j for j in range(window_start, i) if swing_high[j]]
-        sl_indices = [j for j in range(window_start, i) if swing_low[j]]
-
-        if len(sh_indices) < 2 or len(sl_indices) < 2:
-            # Not enough swings to determine structure
-            market_structure[i] = 'ranging'
-            structure_score[i] = 0.0
-            continue
-
-        # Get last 3 swing highs and lows
-        recent_sh = sh_indices[-min(3, len(sh_indices)):]
-        recent_sl = sl_indices[-min(3, len(sl_indices)):]
-
-        sh_levels = [highs[j] for j in recent_sh]
-        sl_levels = [lows[j] for j in recent_sl]
-
-        # Check for Higher Highs (bullish)
-        hh_count = sum(1 for k in range(1, len(sh_levels)) if sh_levels[k] > sh_levels[k-1])
-        # Check for Higher Lows (bullish)
-        hl_count = sum(1 for k in range(1, len(sl_levels)) if sl_levels[k] > sl_levels[k-1])
-
-        # Check for Lower Lows (bearish)
-        ll_count = sum(1 for k in range(1, len(sl_levels)) if sl_levels[k] < sl_levels[k-1])
-        # Check for Lower Highs (bearish)
-        lh_count = sum(1 for k in range(1, len(sh_levels)) if sh_levels[k] < sh_levels[k-1])
-
-        # Calculate bullish and bearish signals
-        bullish_signals = hh_count + hl_count
-        bearish_signals = ll_count + lh_count
-        total_signals = len(sh_levels) - 1 + len(sl_levels) - 1
-
-        if total_signals == 0:
-            market_structure[i] = 'ranging'
-            structure_score[i] = 0.0
-        elif bullish_signals > bearish_signals:
-            market_structure[i] = 'bullish'
-            # Score from 0 to 1
-            structure_score[i] = bullish_signals / total_signals
-        elif bearish_signals > bullish_signals:
-            market_structure[i] = 'bearish'
-            # Score from 0 to -1
-            structure_score[i] = -bearish_signals / total_signals
-        else:
-            market_structure[i] = 'ranging'
-            structure_score[i] = 0.0
-
-    df['market_structure'] = market_structure
-    df['structure_score'] = structure_score
-    return df
-
-def mark_fvg_mitigation(df: pd.DataFrame):
-    """
-    v2.0: Marque les FVGs comme "mitigated" quand le prix les touche
-
-    An FVG is mitigated when price re-enters the gap zone. Mitigated FVGs
-    lose their significance and should not be used for new trade signals.
-
-    This prevents the strategy from repeatedly entering on the same exhausted gap.
-
-    Returns:
-        df with 'fvg_mitigated' column (boolean)
-    """
-    n = len(df)
-    fvg_side = df['fvg_side'].values
-    bull_top = df['fvg_bull_top'].values
-    bull_bot = df['fvg_bull_bot'].values
-    bear_top = df['fvg_bear_top'].values
-    bear_bot = df['fvg_bear_bot'].values
-    highs = df['high'].values
-    lows = df['low'].values
-
-    fvg_mitigated = np.zeros(n, dtype=bool)
-
-    # Track active FVGs (index -> FVG data)
-    active_fvgs = {}
-
-    for i in range(n):
-        # Register new FVG
-        if fvg_side[i] == 'bull':
-            active_fvgs[i] = {
-                'side': 'bull',
-                'top': bull_top[i],
-                'bot': bull_bot[i],
-                'mitigated': False
-            }
-        elif fvg_side[i] == 'bear':
-            active_fvgs[i] = {
-                'side': 'bear',
-                'top': bear_top[i],
-                'bot': bear_bot[i],
-                'mitigated': False
-            }
-
-        # Check if current price mitigates any active FVG
-        current_high = highs[i]
-        current_low = lows[i]
-
-        for fvg_idx, fvg_data in active_fvgs.items():
-            if fvg_data['mitigated']:
-                continue
-
-            # Check if price entered the FVG zone
-            if fvg_data['side'] == 'bull':
-                # Bullish FVG is mitigated if price comes back down into it
-                if current_low <= fvg_data['top'] and current_high >= fvg_data['bot']:
-                    fvg_data['mitigated'] = True
-                    fvg_mitigated[fvg_idx] = True
-
-            elif fvg_data['side'] == 'bear':
-                # Bearish FVG is mitigated if price comes back up into it
-                if current_high >= fvg_data['bot'] and current_low <= fvg_data['top']:
-                    fvg_data['mitigated'] = True
-                    fvg_mitigated[fvg_idx] = True
-
-    df['fvg_mitigated'] = fvg_mitigated
-    return df
-
 def enrich(df: pd.DataFrame):
-    """
-    Enrichit le DataFrame avec tous les indicateurs ICT
-
-    v2.0: Pipeline enrichi avec validation BOS, mitigation FVG, et structure de marché
-    """
-    # Core ICT indicators (v1.0)
+    """Enrichit le DataFrame avec tous les indicateurs ICT"""
     df = swing_points(df, left=2, right=2)
     df = detect_bos(df)
     df = detect_fvg(df)
     df = detect_order_block(df, lookback=12)
     df = calculate_atr(df, period=14)
-
-    # v2.0 Enhancements
-    df = calculate_bos_strength(df)  # BOS strength and age
-    df = detect_market_structure(df, lookback=20)  # HH/HL or LL/LH patterns
-    df = mark_fvg_mitigation(df)  # Track if FVG was already used
-
     return df
 
 def infer_bias(row) -> str:
@@ -726,16 +467,7 @@ def infer_bias(row) -> str:
 # ===============================
 
 def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
-    """
-    v2.0: Cherche le FVG le plus récent où le prix actuel est à l'intérieur
-    avec validation stricte de confluence temporelle, mitigation, et structure de marché
-
-    Filters applied (v2.0):
-    - FVG mitigation: Ignore FVGs already touched by price
-    - BOS recency: Only use BOS within last BOS_MAX_AGE bars
-    - Temporal confluence: FVG and BOS must be within FVG_BOS_MAX_DISTANCE bars
-    - Market structure: Confirm directional bias matches structure (HH/HL or LL/LH)
-    """
+    """Cherche le FVG le plus récent où le prix actuel est à l'intérieur"""
     fvg_side = df['fvg_side'].values
     bull_top = df['fvg_bull_top'].values
     bull_bot = df['fvg_bull_bot'].values
@@ -743,217 +475,38 @@ def latest_fvg_confluence_row(df: pd.DataFrame, idx: int, max_lookback=50):
     bear_bot = df['fvg_bear_bot'].values
     closes = df['close'].values
 
-    # v2.0: FVG mitigation tracking
-    fvg_mitigated = df['fvg_mitigated'].values if 'fvg_mitigated' in df.columns else np.zeros(len(df), dtype=bool)
-
-    # v2.0: BOS recency tracking
-    bos_up = df['bos_up'].values
-    bos_down = df['bos_down'].values
-    bos_age = df['bos_age'].values if 'bos_age' in df.columns else np.full(len(df), np.nan)
-
-    # v2.0: Market structure
-    market_structure = df['market_structure'].values if 'market_structure' in df.columns else np.array(['ranging'] * len(df))
-
     px = closes[idx]
     start = max(idx - max_lookback, 2)
 
-    # Search backwards for valid FVG
     for j in range(idx - 1, start - 1, -1):
         side = fvg_side[j]
-
-        # Skip if not an FVG
-        if side == 'none':
-            continue
-
-        # v2.0: Skip if FVG was already mitigated
-        if USE_FVG_MITIGATION_FILTER and fvg_mitigated[j]:
-            continue
-
-        # Check if price is inside FVG
         if side == 'bull':
             top = bull_top[j]
             bot = bull_bot[j]
-            if np.isnan(top) or np.isnan(bot):
-                continue
-            if not (bot <= px <= top):
-                continue
-
-            # v2.0: Find nearest bullish BOS (search backwards from idx-1)
-            # BUGFIX: Search from idx-1, not idx (current bar may not have BOS yet)
-            nearest_bos_idx = None
-            search_start = max(0, idx - BOS_MAX_AGE if USE_BOS_RECENCY_FILTER else idx - 60)
-            for bos_idx in range(idx - 1, search_start - 1, -1):
-                if bos_up[bos_idx]:
-                    nearest_bos_idx = bos_idx
-                    break
-
-            if nearest_bos_idx is None:
-                continue
-
-            # v2.0: BOS recency filter
-            if USE_BOS_RECENCY_FILTER:
-                bos_distance_from_current = idx - nearest_bos_idx
-                if bos_distance_from_current > BOS_MAX_AGE:
-                    continue
-
-            # v2.0: Temporal confluence - FVG and BOS should be reasonably close
-            # Allow FVG to occur before or after BOS within the distance window
-            fvg_bos_distance = abs(nearest_bos_idx - j)
-            if fvg_bos_distance > FVG_BOS_MAX_DISTANCE:
-                continue
-
-            # v2.0: Market structure filter (allow ranging for more flexibility)
-            if USE_MARKET_STRUCTURE_FILTER:
-                current_structure = market_structure[idx]
-                # Allow bullish or ranging for bullish FVG
-                if current_structure == 'bearish':
-                    continue
-
-            # All filters passed
-            mid = (top + bot) / 2.0
-            return dict(side='bull', top=top, bot=bot, mid=mid, idx_fvg=j, idx_bos=nearest_bos_idx)
-
+            if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
+                mid = (top + bot) / 2.0
+                return dict(side='bull', top=top, bot=bot, mid=mid, idx_fvg=j)
         elif side == 'bear':
             top = bear_top[j]
             bot = bear_bot[j]
-            if np.isnan(top) or np.isnan(bot):
-                continue
-            if not (bot <= px <= top):
-                continue
-
-            # v2.0: Find nearest bearish BOS (search backwards from idx-1)
-            # BUGFIX: Search from idx-1, not idx (current bar may not have BOS yet)
-            nearest_bos_idx = None
-            search_start = max(0, idx - BOS_MAX_AGE if USE_BOS_RECENCY_FILTER else idx - 60)
-            for bos_idx in range(idx - 1, search_start - 1, -1):
-                if bos_down[bos_idx]:
-                    nearest_bos_idx = bos_idx
-                    break
-
-            if nearest_bos_idx is None:
-                continue
-
-            # v2.0: BOS recency filter
-            if USE_BOS_RECENCY_FILTER:
-                bos_distance_from_current = idx - nearest_bos_idx
-                if bos_distance_from_current > BOS_MAX_AGE:
-                    continue
-
-            # v2.0: Temporal confluence - FVG and BOS should be reasonably close
-            # Allow FVG to occur before or after BOS within the distance window
-            fvg_bos_distance = abs(nearest_bos_idx - j)
-            if fvg_bos_distance > FVG_BOS_MAX_DISTANCE:
-                continue
-
-            # v2.0: Market structure filter (allow ranging for more flexibility)
-            if USE_MARKET_STRUCTURE_FILTER:
-                current_structure = market_structure[idx]
-                # Allow bearish or ranging for bearish FVG
-                if current_structure == 'bullish':
-                    continue
-
-            # All filters passed
-            mid = (top + bot) / 2.0
-            return dict(side='bear', top=top, bot=bot, mid=mid, idx_fvg=j, idx_bos=nearest_bos_idx)
-
+            if not np.isnan(top) and not np.isnan(bot) and bot <= px <= top:
+                mid = (top + bot) / 2.0
+                return dict(side='bear', top=top, bot=bot, mid=mid, idx_fvg=j)
     return None
 
 def make_features_for_ml(df, idx, fvg):
-    """
-    v2.0: Extrait 12 features pour le ML (vs 5 en v1.0)
-
-    Features v1.0 (5):
-    - gap: FVG size
-    - range: Price range in last 50 bars
-    - vol: Average volume
-    - bias: Market bias (bull/bear/neutral)
-    - kz: Kill zone (1/0)
-
-    NEW Features v2.0 (7 additional):
-    - atr_norm: ATR normalized by price (volatility context)
-    - fvg_atr_ratio: FVG size / ATR (quality metric)
-    - bos_proximity: Distance from current bar to BOS (recency)
-    - momentum: Rate of change over 10 bars
-    - structure_score: Market structure strength (-1 to +1)
-    - bos_strength_norm: BOS break magnitude / ATR
-    - position_in_fvg: Where price is within FVG (0-1)
-
-    Total: 12 features
-    """
+    """Extrait les features pour le ML"""
     window = df.iloc[max(0, idx-50):idx]
-    current_row = df.iloc[idx]
-
-    # === v1.0 FEATURES (5) ===
     if len(window) < 10:
         rng = 1e-6
         vol = 0.0
     else:
         rng = (window['high'].max() - window['low'].min())
         vol = window['tick_volume'].mean()
-
     gap = abs(fvg['top'] - fvg['bot'])
-    bias = 1 if infer_bias(current_row) == 'bull' else (-1 if infer_bias(current_row) == 'bear' else 0)
+    bias = 1 if infer_bias(df.iloc[idx]) == 'bull' else (-1 if infer_bias(df.iloc[idx]) == 'bear' else 0)
     kz = 1 if in_kill_zone(now_paris()) else 0
-
-    # === v2.0 NEW FEATURES (7) ===
-
-    # 1. atr_norm: ATR normalized by price (measures volatility context)
-    atr_val = current_row.get('atr', 0.0)
-    current_price = current_row['close']
-    atr_norm = (atr_val / current_price) if current_price > 0 else 0.0
-
-    # 2. fvg_atr_ratio: FVG size relative to ATR (quality of the gap)
-    fvg_atr_ratio = (gap / atr_val) if atr_val > 0 else 0.0
-
-    # 3. bos_proximity: How recent is the BOS (0 = very recent, 1 = old)
-    idx_bos = fvg.get('idx_bos', idx)
-    bos_distance = idx - idx_bos
-    bos_proximity = min(bos_distance / 50.0, 1.0)  # Normalize to 0-1
-
-    # 4. momentum: Rate of change over last 10 bars
-    if len(window) >= 10:
-        momentum = (current_row['close'] - window.iloc[-10]['close']) / window.iloc[-10]['close']
-    else:
-        momentum = 0.0
-
-    # 5. structure_score: Market structure strength from detect_market_structure()
-    structure_score = current_row.get('structure_score', 0.0)
-
-    # 6. bos_strength_norm: BOS strength (from calculate_bos_strength)
-    # Get BOS strength at idx_bos
-    if 'bos_strength' in df.columns and idx_bos < len(df):
-        bos_strength_norm = df.iloc[idx_bos].get('bos_strength', 0.0)
-    else:
-        bos_strength_norm = 0.0
-
-    # 7. position_in_fvg: Where is price within the FVG (0=bottom, 1=top)
-    fvg_top = fvg['top']
-    fvg_bot = fvg['bot']
-    fvg_range = fvg_top - fvg_bot
-    if fvg_range > 0:
-        position_in_fvg = (current_price - fvg_bot) / fvg_range
-        position_in_fvg = max(0.0, min(1.0, position_in_fvg))  # Clamp to 0-1
-    else:
-        position_in_fvg = 0.5
-
-    # === COMBINE ALL 12 FEATURES ===
-    x = np.array([
-        # v1.0 features (5)
-        gap,
-        rng,
-        vol,
-        bias,
-        kz,
-        # v2.0 new features (7)
-        atr_norm,
-        fvg_atr_ratio,
-        bos_proximity,
-        momentum,
-        structure_score,
-        bos_strength_norm,
-        position_in_fvg
-    ], dtype=float).reshape(1, -1)
-
+    x = np.array([gap, rng, vol, bias, kz], dtype=float).reshape(1,-1)
     return x
 
 class MLFilter:
@@ -1044,43 +597,17 @@ class MLFilter:
                 self.save_model()
 
     def predict_proba(self, x):
-        """
-        v2.0: Prédit la probabilité de succès avec 12 features
-
-        Fallback heuristic updated for v2.0 features
-        """
+        """Prédit la probabilité de succès"""
         if self.use_meta_labelling and not self.loaded_from_file:
             return 0.99
 
         if not self.enabled or self.model is None or len(self.X) < self.min_samples:
-            # Fallback heuristic using v2.0 features
-            features = x.flatten()
-            if len(features) >= 12:
-                # v2.0: 12 features
-                gap, rng, vol, bias, kz, atr_norm, fvg_atr_ratio, bos_proximity, momentum, structure_score, bos_strength_norm, position_in_fvg = features
-            else:
-                # v1.0: 5 features (backward compatibility)
-                gap, rng, vol, bias, kz = features[:5]
-                fvg_atr_ratio = 1.0
-                bos_proximity = 0.5
-                structure_score = 0.0
-
-            if rng <= 0:
-                return 0.5
-
+            gap, rng, vol, bias, kz = x.flatten()
+            if rng <= 0: return 0.5
             rel = gap / rng
-            # Enhanced heuristic with v2.0 features
-            base = 0.50
-            base += 0.15 * rel  # FVG size relative to range
-            base += 0.05 * kz  # Kill zone bonus
-            base += 0.05 * (1 if bias != 0 else 0)  # Directional bias
-            base += 0.10 * max(0, fvg_atr_ratio - 0.5)  # Quality gap bonus
-            base += 0.05 * (1.0 - bos_proximity)  # Recent BOS bonus
-            base += 0.05 * abs(structure_score)  # Structure strength bonus
-
+            base = 0.50 + 0.20*rel + 0.05*kz + 0.05*(1 if bias!=0 else 0)
             return float(max(0.0, min(0.95, base)))
-
-        p = self.model.predict_proba(x)[0, 1]
+        p = self.model.predict_proba(x)[0,1]
         return float(p)
 
 # ===============================
@@ -1110,12 +637,6 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
         'max_trades_reached': 0,
         'atr_filtered': 0,
         'circuit_breaker_hit': 0,
-        # v2.0 new stats
-        'fvg_mitigated_filtered': 0,
-        'bos_too_old_filtered': 0,
-        'fvg_bos_too_far_filtered': 0,
-        'market_structure_filtered': 0,
-        'extreme_volatility_filtered': 0,
         'entries': 0
     }
 
@@ -1250,17 +771,6 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
             stats['fvg_bias_mismatch'] += 1
             continue
 
-        # v2.0: Extreme volatility filter (skip trades during news events)
-        if USE_EXTREME_VOLATILITY_FILTER and atrs is not None:
-            atr_val = atrs[i]
-            # Calculate median ATR over last 100 bars
-            window_start = max(0, i - 100)
-            atr_window = atrs[window_start:i]
-            median_atr = np.median(atr_window[atr_window > 0]) if len(atr_window[atr_window > 0]) > 0 else atr_val
-            if median_atr > 0 and atr_val > median_atr * VOLATILITY_MULTIPLIER_MAX:
-                stats['extreme_volatility_filtered'] += 1
-                continue
-
         # ML filter
         if ml is not None:
             x = make_features_for_ml(df, i, fvg)
@@ -1271,60 +781,31 @@ def backtest(df: pd.DataFrame, symbol="EURUSD", risk=RISK_PER_TRADE, rr=RR_TAKE_
         else:
             p = 0.5
 
-        # v2.0: SL/TP calculation with Order Block priority
+        # SL/TP basés sur swings
         entry = px
-        ob_low = df['ob_low'].values if 'ob_low' in df.columns else None
-        ob_high = df['ob_high'].values if 'ob_high' in df.columns else None
-        ob_side = df['ob_side'].values if 'ob_side' in df.columns else None
-
         if side == 'buy':
-            # v2.0: Try to use Order Block for SL first
-            sl = None
-            if USE_ORDER_BLOCK_SL and ob_low is not None and ob_side is not None:
-                # Find nearest bullish Order Block
-                for j in range(i-1, max(0, i-60), -1):
-                    if ob_side[j] == 'bull' and not np.isnan(ob_low[j]):
-                        sl = float(ob_low[j])
-                        break
-
-            # Fallback to swing lows if no Order Block found
-            if sl is None:
-                start = max(0, i - 60)
-                window_swing = swing_low[start:i]
-                window_lows = lows[start:i]
-                swing_indices = np.where(window_swing)[0]
-                if len(swing_indices) > 0:
-                    sl = float(window_lows[swing_indices].min())
-                else:
-                    sl = float(lo - 8*pip)
-
+            start = max(0, i - 60)
+            window_swing = swing_low[start:i]
+            window_lows = lows[start:i]
+            swing_indices = np.where(window_swing)[0]
+            if len(swing_indices) > 0:
+                sl = float(window_lows[swing_indices].min())
+            else:
+                sl = float(lo - 8*pip)
             dist = entry - sl
             if dist <= 2*pip:
                 stats['sl_too_close'] += 1
                 continue
             tp = entry + session_rr * dist
-
-        else:  # side == 'sell'
-            # v2.0: Try to use Order Block for SL first
-            sl = None
-            if USE_ORDER_BLOCK_SL and ob_high is not None and ob_side is not None:
-                # Find nearest bearish Order Block
-                for j in range(i-1, max(0, i-60), -1):
-                    if ob_side[j] == 'bear' and not np.isnan(ob_high[j]):
-                        sl = float(ob_high[j])
-                        break
-
-            # Fallback to swing highs if no Order Block found
-            if sl is None:
-                start = max(0, i - 60)
-                window_swing = swing_high[start:i]
-                window_highs = highs[start:i]
-                swing_indices = np.where(window_swing)[0]
-                if len(swing_indices) > 0:
-                    sl = float(window_highs[swing_indices].max())
-                else:
-                    sl = float(hi + 8*pip)
-
+        else:
+            start = max(0, i - 60)
+            window_swing = swing_high[start:i]
+            window_highs = highs[start:i]
+            swing_indices = np.where(window_swing)[0]
+            if len(swing_indices) > 0:
+                sl = float(window_highs[swing_indices].max())
+            else:
+                sl = float(hi + 8*pip)
             dist = sl - entry
             if dist <= 2*pip:
                 stats['sl_too_close'] += 1
@@ -1655,57 +1136,23 @@ def live_loop(symbol=SYMBOL_DEFAULT, timeframe="M1", ml_model_path=None):
             if atr_val > 0 and fvg_size < atr_val * ATR_FVG_MIN_RATIO:
                 continue
 
-        # v2.0: Extreme volatility filter
-        if USE_EXTREME_VOLATILITY_FILTER:
-            atr_val = df.at[i, 'atr']
-            window_start = max(0, i - 100)
-            atr_window = df.iloc[window_start:i]['atr'].values
-            median_atr = np.median(atr_window[atr_window > 0]) if len(atr_window[atr_window > 0]) > 0 else atr_val
-            if median_atr > 0 and atr_val > median_atr * VOLATILITY_MULTIPLIER_MAX:
-                print(f"[LIVE] Volatilite extreme detectee (ATR={atr_val:.5f} > {median_atr*VOLATILITY_MULTIPLIER_MAX:.5f}), trade ignore")
-                continue
-
         side = 'buy' if (bias=='bull' and fvg['side']=='bull') else ('sell' if (bias=='bear' and fvg['side']=='bear') else None)
         if side is None:
             continue
 
-        # v2.0: SL/TP with Order Block priority
         entry = df.at[i, 'close']
         if side=='buy':
-            # v2.0: Try Order Block first
-            sl = None
-            if USE_ORDER_BLOCK_SL and 'ob_low' in df.columns and 'ob_side' in df.columns:
-                for j in range(i-1, max(0, i-60), -1):
-                    if df.at[j, 'ob_side'] == 'bull' and not pd.isna(df.at[j, 'ob_low']):
-                        sl = float(df.at[j, 'ob_low'])
-                        break
-
-            # Fallback to swing lows
-            if sl is None:
-                slice_df = df.iloc[max(0,i-60):i]
-                cands = slice_df[slice_df['swing_low']]
-                sl = float(cands['low'].min()) if len(cands) else float(df.at[i,'low'] - 8*pip)
-
+            slice_df = df.iloc[max(0,i-60):i]
+            cands = slice_df[slice_df['swing_low']]
+            sl = float(cands['low'].min()) if len(cands) else float(df.at[i,'low'] - 8*pip)
             dist = entry - sl
             if dist <= 2*pip:
                 continue
             tp = entry + RR_TAKE_PROFIT * dist
-
-        else:  # sell
-            # v2.0: Try Order Block first
-            sl = None
-            if USE_ORDER_BLOCK_SL and 'ob_high' in df.columns and 'ob_side' in df.columns:
-                for j in range(i-1, max(0, i-60), -1):
-                    if df.at[j, 'ob_side'] == 'bear' and not pd.isna(df.at[j, 'ob_high']):
-                        sl = float(df.at[j, 'ob_high'])
-                        break
-
-            # Fallback to swing highs
-            if sl is None:
-                slice_df = df.iloc[max(0,i-60):i]
-                cands = slice_df[slice_df['swing_high']]
-                sl = float(cands['high'].max()) if len(cands) else float(df.at[i,'high'] + 8*pip)
-
+        else:
+            slice_df = df.iloc[max(0,i-60):i]
+            cands = slice_df[slice_df['swing_high']]
+            sl = float(cands['high'].max()) if len(cands) else float(df.at[i,'high'] + 8*pip)
             dist = sl - entry
             if dist <= 2*pip:
                 continue
@@ -1906,24 +1353,17 @@ def main():
 
                 st = metrics['stats']
                 total_bars = len(df) - 50
-                print(f"\n=== STATISTIQUES DE FILTRAGE v2.0 ===")
+                print(f"\n=== STATISTIQUES DE FILTRAGE ===")
                 print(f"Barres analysees: {total_bars}")
                 print(f"|- Cooldown: {st['cooldown_filtered']}")
                 print(f"|- Kill zones: {st['killzone_filtered']}")
                 print(f"|- Pas de FVG: {st['no_fvg']}")
                 print(f"|- Biais neutre: {st['neutral_bias']}")
                 print(f"|- FVG/Biais incompatibles: {st['fvg_bias_mismatch']}")
-                print(f"|- Filtrees par ATR: {st['atr_filtered']}")
-                print(f"[v2.0 FILTERS]")
-                print(f"|- FVG deja mitiges: {st.get('fvg_mitigated_filtered', 0)}")
-                print(f"|- BOS trop ancien: {st.get('bos_too_old_filtered', 0)}")
-                print(f"|- FVG-BOS trop eloignes: {st.get('fvg_bos_too_far_filtered', 0)}")
-                print(f"|- Structure de marche: {st.get('market_structure_filtered', 0)}")
-                print(f"|- Volatilite extreme: {st.get('extreme_volatility_filtered', 0)}")
-                print(f"[FINAL FILTERS]")
                 print(f"|- Filtrees par ML: {st['ml_filtered']}")
                 print(f"|- SL trop proche: {st['sl_too_close']}")
                 print(f"|- Max trades atteint: {st['max_trades_reached']}")
+                print(f"|- Filtrees par ATR: {st['atr_filtered']}")
                 print(f"|- Circuit breaker: {st['circuit_breaker_hit']}")
                 print(f"'- Entrees validees: {st['entries']}\n")
 
@@ -1976,16 +1416,7 @@ def main():
                             "ATR_FVG_MAX_RATIO": ATR_FVG_MAX_RATIO,
                             "USE_CIRCUIT_BREAKER": USE_CIRCUIT_BREAKER,
                             "DAILY_DD_LIMIT": DAILY_DD_LIMIT,
-                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK,
-                            "_comment_v2.1": "=== ICT Strategy v2.1 Enhancements ===",
-                            "USE_BOS_RECENCY_FILTER": USE_BOS_RECENCY_FILTER,
-                            "BOS_MAX_AGE": BOS_MAX_AGE,
-                            "USE_FVG_MITIGATION_FILTER": USE_FVG_MITIGATION_FILTER,
-                            "USE_MARKET_STRUCTURE_FILTER": USE_MARKET_STRUCTURE_FILTER,
-                            "FVG_BOS_MAX_DISTANCE": FVG_BOS_MAX_DISTANCE,
-                            "USE_ORDER_BLOCK_SL": USE_ORDER_BLOCK_SL,
-                            "USE_EXTREME_VOLATILITY_FILTER": USE_EXTREME_VOLATILITY_FILTER,
-                            "VOLATILITY_MULTIPLIER_MAX": VOLATILITY_MULTIPLIER_MAX
+                            "USE_ADAPTIVE_RISK": USE_ADAPTIVE_RISK
                         }
                     }
                     with open(filename, 'w', encoding='utf-8') as f:

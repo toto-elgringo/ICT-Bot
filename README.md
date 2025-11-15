@@ -1,4 +1,4 @@
-# 🤖 ICT Trading Bot v2.1
+# 🤖 ICT Trading Bot
 
 Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader)** avec filtrage par **Machine Learning** et notifications **Telegram** en temps réel.
 
@@ -19,50 +19,14 @@ Bot de trading automatisé basé sur la méthodologie **ICT (Inner Circle Trader
 
 ---
 
-## 📝 Changelog v2.1 (13 Novembre 2025)
-
-### Améliorations Stratégie ICT
-- ✅ **Validation de récence BOS**: Seuls les BOS des 20 dernières barres sont valides
-- ✅ **Tracking de mitigation FVG**: Ignore les FVGs déjà touchés par le prix
-- ✅ **Détection de structure de marché**: HH/HL (bullish) ou LL/LH (bearish)
-- ✅ **Confluence temporelle stricte**: FVG et BOS doivent être à < 20 barres
-- ✅ **Order Blocks pour Stop Loss**: Meilleure protection que les swing points
-- ✅ **Filtre de volatilité extrême**: Ignore les trades si ATR > 3× médiane (protection news)
-
-### Améliorations Machine Learning
-- ✅ **12 features ML** (vs 5 en v1.0):
-  - Contexte marché: gap, range, vol, bias, kz
-  - Technique: atr_norm, fvg_atr_ratio, bos_proximity, momentum
-  - Structure: structure_score, bos_strength_norm, position_in_fvg
-- ✅ **Breaking Change**: Modèles v1.0 incompatibles - supprimer les .pkl existants
-
-### Améliorations Grid Search
-- ✅ **Mode ADVANCED**: 27,648 combinaisons (vs 1,728 en standard)
-- ✅ **3 nouveaux paramètres testés**: BOS_MAX_AGE, FVG_BOS_MAX_DISTANCE, VOLATILITY_MULTIPLIER_MAX
-
-### Performances Attendues
-- 📈 **Win Rate**: +10% (53.5% → 59-63%)
-- 📉 **Max Drawdown**: -7% (-14.88% → -8-10%)
-- 🎯 **Qualité**: -35% de trades mais meilleure qualité
-
----
-
 ## ✨ Fonctionnalités
 
-- ✅ **Stratégie ICT v2.1** : Fair Value Gaps (FVG), Break of Structure (BOS), Order Blocks (OB), Kill Zones
-  - ⭐ **NOUVEAU**: Validation temporelle stricte (FVG + BOS < 20 barres)
-  - ⭐ **NOUVEAU**: Détection de structure de marché (HH/HL bullish, LL/LH bearish)
-  - ⭐ **NOUVEAU**: Tracking de mitigation FVG (ignore les FVGs déjà touchés)
-  - ⭐ **NOUVEAU**: Filtre de volatilité extrême (protection contre les news)
-  - ⭐ **NOUVEAU**: Order Blocks pour Stop Loss (meilleure protection)
-- ✅ **Machine Learning v2.1** : Meta-labelling avec 12 features (vs 5 en v1.0)
-  - ⭐ **NOUVEAU**: Features de structure (structure_score, bos_strength_norm, position_in_fvg)
-  - ⭐ **NOUVEAU**: Features techniques (atr_norm, fvg_atr_ratio, bos_proximity, momentum)
-  - Modèle individuel par bot avec rolling window anti-overfitting
+- ✅ **Stratégie ICT** : Fair Value Gaps (FVG), Break of Structure (BOS), Order Blocks (OB), Kill Zones
+- ✅ **Machine Learning** : Meta-labelling avec Logistic Regression pour filtrer les trades (modèle individuel par bot)
 - ✅ **Gestion Multi-Bot** : Gérez plusieurs bots simultanément avec des configurations différentes
 - ✅ **Dashboard Streamlit** : Interface web complète pour contrôler tous vos bots
 - ✅ **Configurations Nommées** : Créez et gérez plusieurs stratégies (Default, Aggressive, Conservative, etc.)
-- ✅ **Grid Testing** : Mode Standard (1,728 tests) ou Advanced (27,648 tests avec paramètres v2.1)
+- ✅ **Grid Testing** : Optimisation automatique de 1,728 combinaisons de paramètres pour trouver la meilleure config
 - ✅ **Notifications Telegram** : Alertes en temps réel lors de l'ouverture de positions
 - ✅ **Backtesting** : Testez vos stratégies sur des données historiques
 - ✅ **Risk Management** : Circuit breaker, risque adaptatif, sessions adaptatives
@@ -1047,8 +1011,8 @@ Ce projet est fourni "tel quel" sans garantie. Utilisez-le à vos propres risque
 
 ---
 
-**Version** : 2.1 - Enhanced ICT Strategy avec 12 ML Features
-**Dernière mise à jour** : 14 Novembre 2025
-**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & v2.1 Strategy Enhancements
+**Version** : 3.2 - Multi-Bot Edition avec Grid Testing Optimisé (25-35x speedup)
+**Dernière mise à jour** : 11 Novembre 2025
+**Bot** : ICT Trading Bot with ML Meta-Labelling, Multi-Bot Management & Ultra-Fast Grid Testing
 
 🤖 **Happy Trading!**
